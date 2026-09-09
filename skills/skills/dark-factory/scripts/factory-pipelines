@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+#
+# factory-pipelines [--prompts | --json]
+#
+# Lists the factory's pipelines: id, name, and the stage names in order.
+# With --prompts, fetches each pipeline and prints every stage's kind, prompt,
+# and command, so a stage's instructions can be read without the cockpit.
+# With --json, prints each pipeline's full definition as one JSON object per
+# line, which is the backup to keep before a pipeline is changed.
+# Read only. GET /api/v1/pipelines returns protocol.PipelinePage;
+# GET /api/v1/pipelines/{id} returns one protocol.Pipeline with full stages.
+#
+# Exit: 0 ok, 1 API error.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+API="$SCRIPTS/factory-api"
+
+prompts=0; json=0
+case "${1:-}" in --prompts) prompts=1 ;; --json) json=1 ;; esac
+
+page="$("$API" GET /api/v1/pipelines)" || exit 1
+if [ "$prompts" -eq 0 ] && [ "$json" -eq 0 ]; then
+  printf '%s' "$page" | jq -r '.pipelines[] | "\(.id)\t\(.name)\t" + ([.stages[]? | .name] | join(" > "))'
+  exit 0
+fi
+for id in $(printf '%s' "$page" | jq -r '.pipelines[].id'); do
+  one="$("$API" GET "/api/v1/pipelines/$id")" || exit 1
+  if [ "$json" -eq 1 ]; then printf '%s' "$one" | jq -c '(.pipeline // .)'; continue; fi
+  printf '%s' "$one" | jq -r '(.pipeline // .) | "== \(.name) (\(.id))", (.stages[]? | "-- stage \(.position) \(.name) kind=\(.kind // "")" , (if (.command // "") != "" then "command: \(.command)" else empty end), (.prompt // "(no prompt)"), "")'
+done

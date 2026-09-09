@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#
+# factory-profiles
+#
+# Lists the factory's execution profiles: what backend and sandbox each one
+# runs in, which runtime and model, and whether it is enabled and healthy.
+# Read only. GET /api/v1/execution-profiles returns protocol.ExecutionProfilePage.
+#
+# Exit: 0 ok, 1 API error.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+API="$SCRIPTS/factory-api"
+
+page="$("$API" GET /api/v1/execution-profiles)" || exit 1
+printf '%s' "$page" | jq -r '.profiles[] | "\(.id)\t\(.name)\tkind=\(.kind)\truntime=\(.runtime)\tmodel=\(.model)\tenabled=\(.enabled)\thealthy=\(.healthy)\tsandbox=\(.sandbox // "none" | tostring)"'

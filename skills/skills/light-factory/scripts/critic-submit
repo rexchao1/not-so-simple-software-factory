@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+#
+# critic-submit <project> <n> --round <r>
+#
+# Sends a checkpoint's PRD to the critic and waits for the findings.
+#
+# The critic is the one part of the light factory that is not this session: a
+# fresh context with read-only tools, running on the mini as factory Work on
+# the built-in Critique pipeline. It is submitted here rather than run here so
+# that its read-only guarantee is the worker's, not a prompt's.
+#
+# What this does, in order:
+#
+#   1. Reads the PRD body from the server, not from a file in the checkout.
+#      The server holds what was actually saved, and critiquing a draft that
+#      was never saved would produce findings against text nobody can read
+#      back later.
+#   2. Writes it to a temporary spec file, because factory-submit takes a file
+#      and owns every other field of the admission payload.
+#   3. Submits it with --pipeline Critique and --planning <project>:<n>:<r>.
+#      The planning triple is what lets the roadmap join this Work to its
+#      checkpoint and show the round and its cost as a pass.
+#   4. Polls the Work until it is terminal, printing one line per state change
+#      to stderr so a wait of minutes is not a blank screen.
+#   5. Prints the Work result, the findings JSON, on stdout.
+#
+# There is no local copy of the findings. The Work row is the record, and a
+# second copy in a file would drift from it.
+#
+# needs-input stops the wait. The Critique pipeline should never ask, and
+# waiting out an hour on a question nobody is watching for is worse than
+# saying so now.
+#
+# CRITIC_POLL_SECONDS (default 15) and CRITIC_TIMEOUT_SECONDS (default 3600)
+# exist so the tests do not sleep. Leave them alone in a session.
+#
+# Exit: 0 the Work succeeded and its result is on stdout, 1 the Work failed,
+# was cancelled, asked a question, or the API refused, 2 usage.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+API="$SCRIPTS/../../dark-factory/scripts/factory-api"
+SUBMIT="$SCRIPTS/../../dark-factory/scripts/factory-submit"
+
+POLL="${CRITIC_POLL_SECONDS:-15}"
+TIMEOUT="${CRITIC_TIMEOUT_SECONDS:-3600}"
+
+usage() { echo "usage: critic-submit <project> <n> --round <r>" >&2; exit 2; }
+[ "$#" -ge 2 ] || usage
+[ -x "$API" ] && [ -x "$SUBMIT" ] || {
+  echo "error: the dark-factory scripts are not beside this skill (looked in $SCRIPTS/../../dark-factory/scripts)" >&2
+  echo "hint: the critic is factory Work, so light-factory submits it through dark-factory. Install both." >&2
+  exit 2; }
+
+given="$1"
+project="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+n="$2"; shift 2
+round=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --round) round="${2:-}"; shift 2 ;;
+    *) echo "error: unknown argument: $1" >&2; usage ;;
+  esac
+done
+
+[[ "$project" =~ ^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$ ]] || {
+  echo "error: '$given' is not a project slug" >&2; exit 2; }
+[[ "$n" =~ ^[0-9]+$ ]] || { echo "error: checkpoint number must be an integer" >&2; exit 2; }
+n=$((10#$n))
+# The round is not guessed. It is half of the join key the roadmap uses, and a
+# wrong one silently files this pass under another round.
+[[ "$round" =~ ^[0-9]+$ ]] && [ "$((10#$round))" -ge 1 ] || {
+  echo "error: --round <r> is required and must be 1 or more" >&2; exit 2; }
+round=$((10#$round))
+
+checkpoint="$("$API" GET "/api/v1/planning/projects/$project/checkpoints/$n")" || exit 1
+body="$(printf '%s' "$checkpoint" | jq -r '.body // ""')"
+title="$(printf '%s' "$checkpoint" | jq -r '.title // ""')"
+if [ -z "$(printf '%s' "$body" | tr -d '[:space:]')" ]; then
+  echo "error: checkpoint $n of $project has no PRD saved. Save it with planning-save-prd first" >&2
+  exit 2
+fi
+
+work_dir="$(mktemp -d)"
+trap 'rm -rf "$work_dir"' EXIT
+spec="$work_dir/$project-$n-round-$round.md"
+printf '%s\n' "$body" > "$spec"
+
+name="Critique $project checkpoint $n round $round"
+[ -n "$title" ] && [ "$title" != "null" ] && name="Critique: $title (checkpoint $n, round $round)"
+
+submitted="$("$SUBMIT" --project "$project" --name "$name" --spec-file "$spec" \
+  --pipeline Critique --planning "$project:$n:$round")" || exit 1
+run_id="$(printf '%s\n' "$submitted" | sed -n 's/^run  *//p' | head -n1)"
+work_id="$(printf '%s\n' "$submitted" | sed -n 's/^work  *//p' | head -n1)"
+[ -n "$run_id" ] || { echo "error: factory-submit printed no run id" >&2; exit 1; }
+echo "critic  run $run_id  work $work_id" >&2
+
+waited=0
+last=""
+while :; do
+  detail="$("$API" GET "/api/v1/runs/$run_id")" || exit 1
+  session="$(printf '%s' "$detail" | jq -c --arg w "$work_id" \
+    '(.sessions // []) | (map(select(.id == $w)) | .[0]) // (.[0] // {})')"
+  state="$(printf '%s' "$session" | jq -r '.state // ""')"
+
+  if [ "$state" != "$last" ]; then
+    echo "state   ${state:-unknown}" >&2
+    last="$state"
+  fi
+
+  case "$state" in
+    succeeded|ready|no-change)
+      printf '%s' "$session" | jq -r '.result // ""'
+      echo "critic  done: $state" >&2
+      exit 0 ;;
+    failed|cancelled)
+      printf '%s' "$session" | jq -r '.result // ""'
+      printf '%s' "$session" | jq -r '
+        (if (.failure_reason // "") != "" then "reason  " + .failure_reason else empty end),
+        (if (.terminal_message // "") != "" then "note    " + ((.terminal_message | split("\n")) | join(" ")) else empty end)' >&2
+      echo "critic  the Work did not succeed: $state" >&2
+      exit 1 ;;
+    needs-input)
+      printf '%s' "$session" | jq -r '
+        "question " + (.question // "(the Work is waiting on an answer and did not say what it needs)")' >&2
+      echo "critic  a critique should not need input. Read the Work in the cockpit before answering it." >&2
+      exit 1 ;;
+  esac
+
+  if [ "$waited" -ge "$TIMEOUT" ]; then
+    echo "critic  gave up waiting after ${TIMEOUT}s. The Work is still $state; read it with factory-status $run_id" >&2
+    exit 1
+  fi
+  sleep "$POLL"
+  # The clock advances even when a test sets the interval to zero, so a Work
+  # that never leaves running still hits the timeout instead of spinning.
+  waited=$((waited + (POLL > 0 ? POLL : 1)))
+done

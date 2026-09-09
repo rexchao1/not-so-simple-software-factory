@@ -1,0 +1,16 @@
+# role	runtime	model	effort	price_in	price_out
+#
+# One row per role, the record of what each kind of pass runs on. `plan` is the
+# planning passes: route, draft, revise, freeze, and pebble. `critic` is the
+# critique pass, and its model and effort are what the factory's critique
+# pipeline stage is set to. effort is claude's --effort: low, medium, high,
+# xhigh, max. Prices are dollars per million tokens and feed cost estimates
+# only; a measured pass uses the cost claude reports.
+#
+# `build` is the factory. Its model is the execution profile's, set in the
+# cockpit, not here, so that row carries prices only and the model column says
+# so. Every planning row runs on claude: a second vendor for the critic was
+# considered and dropped on 2026-09-04.
+plan	claude	claude-fable-5-1	high	10	50
+critic	claude	claude-opus-5	xhigh	5	25
+build	factory	profile	-	2	10

@@ -1,0 +1,1129 @@
+package controlplane
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"strings"
+
+	"github.com/owainlewis/factory/internal/protocol"
+)
+
+func (s *Store) Claim(ctx context.Context, workerID string, input protocol.ClaimRequest) (*protocol.Claim, error) {
+	input.RequestID = strings.TrimSpace(input.RequestID)
+	if input.RequestID == "" || len(input.RequestID) > 200 {
+		return nil, invalid("invalid_request_id", "request_id is required")
+	}
+	if err := validateToken(input.LeaseToken); err != nil {
+		return nil, err
+	}
+	digest := digestToken(input.LeaseToken)
+	now := s.now()
+	nowMillis := now.UnixMilli()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	defer tx.Rollback()
+	var capacity, healthy, claimProtocolVersion, synthetic int
+	var lastHeartbeat int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT capacity, health = 'healthy', last_heartbeat, claim_protocol_version, synthetic
+		FROM workers WHERE id = ?
+	`, workerID).Scan(&capacity, &healthy, &lastHeartbeat, &claimProtocolVersion, &synthetic)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	if synthetic != 0 {
+		return nil, conflict("synthetic_worker_isolated", "synthetic cloud Workers cannot use Worker claim routes")
+	}
+	if claimProtocolVersion != protocol.ClaimProtocolVersion {
+		return nil, conflict(
+			"worker_upgrade_required",
+			"the Worker uses an incompatible claim protocol; upgrade it before claiming a Session",
+		)
+	}
+
+	var storedDigest []byte
+	var storedAttempt sql.NullString
+	var claimCreated int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT lease_digest, attempt_id, created_at FROM claim_requests
+		WHERE worker_id = ? AND request_id = ?
+	`, workerID, input.RequestID).Scan(&storedDigest, &storedAttempt, &claimCreated)
+	if err == nil {
+		if !equalDigest(storedDigest, digest) {
+			return nil, conflict("claim_request_conflict", "request_id was already used with a different lease token")
+		}
+		if !storedAttempt.Valid {
+			if now.Sub(fromMillis(claimCreated)) <= protocol.EmptyClaimTTL {
+				if err := tx.Commit(); err != nil {
+					return nil, unavailable(err)
+				}
+				return nil, nil
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM claim_requests WHERE worker_id = ? AND request_id = ?`, workerID, input.RequestID); err != nil {
+				return nil, unavailable(err)
+			}
+		} else {
+			var state string
+			var expiry int64
+			var attemptDigest []byte
+			err := tx.QueryRowContext(ctx, `
+				SELECT state, lease_expires_at, lease_digest FROM attempts WHERE id = ?
+			`, storedAttempt.String).Scan(&state, &expiry, &attemptDigest)
+			if err != nil {
+				return nil, unavailable(err)
+			}
+			if !equalDigest(attemptDigest, digest) || !isActive(state) || expiry <= nowMillis {
+				return nil, conflict("lease_not_owner", "the claim no longer owns an active lease")
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, unavailable(err)
+			}
+			claim, err := s.claimDetail(ctx, storedAttempt.String)
+			return &claim, err
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, unavailable(err)
+	}
+
+	var active int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM attempts
+		WHERE worker_id = ? AND state IN ('preparing', 'running')
+	`, workerID).Scan(&active); err != nil {
+		return nil, unavailable(err)
+	}
+	// A paused Factory dispatches nothing, and it reaches that conclusion here
+	// rather than at the top of the function for two reasons. The claim_request
+	// replay above must still return an already-created Attempt, or a Worker
+	// retrying across a pause loses the Attempt it owns (INV-4). And the answer
+	// to a paused claim is "no Work", not an error: the Worker is healthy and
+	// polling correctly, so returning 409 would log a claim failure on every
+	// poll of every Worker for the whole pause.
+	var paused int
+	if err := tx.QueryRowContext(ctx, `SELECT paused FROM factory_settings WHERE id = 1`).Scan(&paused); err != nil {
+		return nil, unavailable(err)
+	}
+	if paused != 0 || healthy == 0 ||
+		now.Sub(fromMillis(lastHeartbeat)) > protocol.WorkerOnlineWindow || active >= capacity {
+		if err := insertEmptyClaim(ctx, tx, workerID, input.RequestID, digest, nowMillis); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, unavailable(err)
+		}
+		return nil, nil
+	}
+	if err := s.materializeBlockedSessionForWorker(ctx, tx, workerID, nowMillis); err != nil {
+		return nil, err
+	}
+	if err := s.rerouteQueuedSessionForWorker(ctx, tx, workerID, nowMillis); err != nil {
+		return nil, err
+	}
+
+	var executionID string
+	err = tx.QueryRowContext(ctx, `
+		SELECT e.id
+		FROM executions e
+		JOIN sessions session ON session.id = e.session_id
+		JOIN runs run ON run.id = session.run_id
+		JOIN repositories repository ON repository.id = session.repository_id
+		JOIN worker_repositories wr
+		  ON wr.worker_id = e.assigned_worker_id AND wr.repository_id = session.repository_id
+		WHERE e.assigned_worker_id = ?
+		  AND EXISTS (
+		      SELECT 1
+		      FROM workers claim_worker, json_each(claim_worker.capabilities_json) capability
+		      WHERE claim_worker.id = ?
+		        AND json_extract(capability.value, '$.kind') = 'runtime'
+		        AND json_extract(capability.value, '$.name') = e.required_runtime
+		        AND json_extract(capability.value, '$.status') = 'ready'
+		      UNION ALL
+		      SELECT 1
+		      FROM workers legacy_worker
+		      WHERE legacy_worker.id = ?
+		        AND json_array_length(legacy_worker.capabilities_json) = 0
+		        AND legacy_worker.runtime = e.required_runtime
+		  )
+		  AND e.state = 'queued'
+		  AND (
+		      SELECT COUNT(*)
+		      FROM sessions sibling
+		      WHERE sibling.run_id = session.run_id
+		        AND sibling.state IN ('preparing', 'running')
+		  ) < json_extract(run.task_snapshot, '$.concurrency_limit')
+		  AND wr.advertised = 1
+		  AND (repository.centrally_managed = 0 OR repository.enabled = 1)
+		  AND wr.retained_count + (
+		      SELECT COUNT(*)
+		      FROM attempts active_attempt
+		      JOIN executions active_execution ON active_execution.id = active_attempt.execution_id
+		      JOIN sessions active_session ON active_session.id = active_execution.session_id
+		      WHERE active_attempt.worker_id = e.assigned_worker_id
+		        AND active_session.repository_id = session.repository_id
+		        AND active_attempt.state IN ('preparing', 'running')
+		  ) + (
+		      SELECT COUNT(*)
+		      FROM attempts terminal_attempt
+		      JOIN executions terminal_execution ON terminal_execution.id = terminal_attempt.execution_id
+		      JOIN sessions terminal_session ON terminal_session.id = terminal_execution.session_id
+		      WHERE terminal_attempt.worker_id = e.assigned_worker_id
+		        AND terminal_session.repository_id = session.repository_id
+		        AND terminal_attempt.state IN ('succeeded', 'failed', 'cancelled', 'lost')
+		        AND terminal_attempt.capacity_acknowledged = 0
+		  ) < ?
+		ORDER BY (
+			SELECT COUNT(*)
+			FROM attempts previous_attempt
+			JOIN executions previous_execution ON previous_execution.id = previous_attempt.execution_id
+			JOIN sessions previous_session ON previous_session.id = previous_execution.session_id
+			WHERE previous_session.run_id = session.run_id
+		), run.admitted_at, e.created_at, e.id
+		LIMIT 1
+	`, workerID, workerID, workerID, protocol.MaxRetainedPerRepo).Scan(&executionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := insertEmptyClaim(ctx, tx, workerID, input.RequestID, digest, nowMillis); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, unavailable(err)
+		}
+		return nil, nil
+	}
+	if err != nil {
+		return nil, unavailable(err)
+	}
+
+	attemptID, err := newID()
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	var attemptNumber int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(attempt_number), 0) + 1 FROM attempts WHERE execution_id = ?
+	`, executionID).Scan(&attemptNumber); err != nil {
+		return nil, unavailable(err)
+	}
+	expiry := now.Add(protocol.LeaseDuration).UnixMilli()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO attempts(id, execution_id, worker_id, attempt_number, state, lease_digest, lease_expires_at, created_at)
+		VALUES (?, ?, ?, ?, 'preparing', ?, ?, ?)
+	`, attemptID, executionID, workerID, attemptNumber, digest, expiry, nowMillis); err != nil {
+		return nil, unavailable(err)
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE executions SET state = 'preparing', cancellation_requested = 0, updated_at = ?
+		WHERE id = ? AND state = 'queued'
+	`, nowMillis, executionID)
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	changed, _ := result.RowsAffected()
+	if changed != 1 {
+		return nil, conflict("claim_conflict", "execution is no longer queued")
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE sessions SET state = 'preparing', assigned_worker_id = ?, blocked_reason = NULL,
+		       waiting_reason = '', execution_owner = 'worker_attempt'
+		WHERE id = (SELECT session_id FROM executions WHERE id = ?) AND state = 'queued'
+	`, workerID, executionID); err != nil {
+		return nil, unavailable(err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO claim_requests(worker_id, request_id, lease_digest, attempt_id, created_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, workerID, input.RequestID, digest, attemptID, nowMillis); err != nil {
+		return nil, unavailable(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, unavailable(err)
+	}
+	claim, err := s.claimDetail(ctx, attemptID)
+	return &claim, err
+}
+
+func insertEmptyClaim(ctx context.Context, tx *sql.Tx, workerID, requestID string, digest []byte, now int64) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO claim_requests(worker_id, request_id, lease_digest, attempt_id, created_at)
+		VALUES (?, ?, ?, NULL, ?)
+	`, workerID, requestID, digest, now)
+	if err != nil {
+		return unavailable(err)
+	}
+	return nil
+}
+
+func (s *Store) claimDetail(ctx context.Context, attemptID string) (protocol.Claim, error) {
+	var claim protocol.Claim
+	row := s.db.QueryRowContext(ctx, `
+		SELECT a.id, a.execution_id, a.worker_id, a.attempt_number, a.state, a.lease_expires_at,
+		       a.supervisor_pid, a.process_identity, a.process_group_id, a.result, a.error,
+		       a.started_at, a.completed_at, a.created_at,
+		       a.cost_usd, a.input_tokens, a.cache_creation_input_tokens,
+		       a.cache_read_input_tokens, a.output_tokens, a.models
+		FROM attempts a WHERE a.id = ?
+	`, attemptID)
+	var err error
+	claim.Attempt, err = scanAttempt(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return claim, ErrNotFound
+	}
+	if err != nil {
+		return claim, unavailable(err)
+	}
+	row = s.db.QueryRowContext(ctx, `
+		SELECT id, session_id, assigned_worker_id, required_runtime, state,
+		       cancellation_requested, created_at, updated_at
+		FROM executions WHERE id = ?
+	`, claim.Attempt.ExecutionID)
+	var executionCreatedAt, executionUpdatedAt int64
+	if err = row.Scan(&claim.Execution.ID, &claim.Execution.SessionID,
+		&claim.Execution.AssignedWorkerID, &claim.Execution.RequiredRuntime,
+		&claim.Execution.State, &claim.Execution.CancellationRequested,
+		&executionCreatedAt, &executionUpdatedAt); err != nil {
+		return claim, unavailable(err)
+	}
+	claim.Execution.CreatedAt = fromMillis(executionCreatedAt)
+	claim.Execution.UpdatedAt = fromMillis(executionUpdatedAt)
+	row = s.db.QueryRowContext(ctx, `
+		SELECT session.id, session.run_id, json_extract(run.task_snapshot, '$.name'),
+		       session.resolved_prompt, session.repository_id, session.timeout_seconds,
+		       e.assigned_worker_id, e.required_runtime, e.state, session.admitted_at,
+		       run.outcome_contract, session.target_position, session.target_key,
+		       session.target_kind, session.repository_identity, session.source_kind,
+		       session.source_key, session.source_reference, session.context_snapshot,
+		       session.publish_branch, session.checkpoint_sha, session.pending_resume_sha,
+		       session.checkpoint_published, session.pull_request_url,
+		       session.pull_request_head_branch, session.pull_request_head_sha,
+		       COALESCE(json_extract(run.execution_snapshot, '$.sandbox'), '')
+		FROM sessions session
+		JOIN runs run ON run.id = session.run_id
+		JOIN executions e ON e.session_id = session.id
+		WHERE session.id = ?
+	`, claim.Execution.SessionID)
+	var admittedAt int64
+	var frozenSandbox string
+	if err = row.Scan(&claim.Session.ID, &claim.Session.RunID, &claim.Session.TaskName,
+		&claim.Session.Prompt, &claim.Session.RepositoryID, &claim.Session.TimeoutSeconds,
+		&claim.Session.WorkerID, &claim.Session.RequiredRuntime, &claim.Session.State,
+		&admittedAt, &claim.Session.OutcomeContract, &claim.Session.Target.Position,
+		&claim.Session.Target.TargetKey, &claim.Session.Target.TargetKind,
+		&claim.Session.Target.RepositoryIdentity, &claim.Session.Target.SourceKind,
+		&claim.Session.Target.SourceKey, &claim.Session.Target.SourceReference,
+		&claim.Session.Target.ContextSnapshot, &claim.Session.Target.PublishBranch,
+		&claim.Session.CheckpointSHA, &claim.Session.PendingResumeSHA,
+		&claim.Session.CheckpointPublished,
+		&claim.Session.PullRequestURL, &claim.Session.PullRequestHeadBranch,
+		&claim.Session.PullRequestHeadSHA, &frozenSandbox); err != nil {
+		return claim, unavailable(err)
+	}
+	// The Worker learns its container posture from the Run's frozen snapshot,
+	// never from the profile, so editing the profile mid Run cannot change how
+	// this attempt is confined. INV-6 rests on the posture being fixed here.
+	if frozenSandbox != "" {
+		var sandbox protocol.Sandbox
+		if err := json.Unmarshal([]byte(frozenSandbox), &sandbox); err != nil {
+			return claim, unavailable(err)
+		}
+		claim.Execution.Sandbox = &sandbox
+	}
+	claim.Session.AdmittedAt = fromMillis(admittedAt)
+	claim.Session.Target.ID = claim.Session.ID
+	claim.Session.Target.RepositoryID = claim.Session.RepositoryID
+	stageRows, err := s.db.QueryContext(ctx, `
+		SELECT position, name, kind, prompt, command, model, effort, read_only,
+		       state, result, error, started_at, completed_at, `+stageCostColumns+`
+		FROM session_stages WHERE session_id = ? ORDER BY position
+	`, claim.Session.ID)
+	if err != nil {
+		return claim, unavailable(err)
+	}
+	for stageRows.Next() {
+		stage, err := scanStageRun(stageRows)
+		if err != nil {
+			stageRows.Close()
+			return claim, unavailable(err)
+		}
+		claim.Session.Stages = append(claim.Session.Stages, stage)
+	}
+	if err := stageRows.Err(); err != nil {
+		stageRows.Close()
+		return claim, unavailable(err)
+	}
+	if err := stageRows.Close(); err != nil {
+		return claim, unavailable(err)
+	}
+	if len(claim.Session.Stages) == 0 {
+		claim.Session.Stages = []protocol.StageRun{{Position: 0, Name: "Do the task", Prompt: claim.Session.Prompt, State: protocol.StagePending}}
+	} else {
+		claim.Session.Prompt = ""
+	}
+	if claim.Session.OutcomeContract == protocol.OutcomeAgentUpdate {
+		continuationPrompt, err := s.continuationPrompt(ctx, claim.Session.ID)
+		if err != nil {
+			return claim, err
+		}
+		claim.Session.Stages[len(claim.Session.Stages)-1].Prompt = continuationPrompt
+		if claim.Session.Prompt != "" {
+			claim.Session.Prompt = continuationPrompt
+		}
+	}
+	err = s.db.QueryRowContext(ctx, `
+		SELECT r.id, wr.display_key,
+		       COALESCE(
+		           NULLIF(session.repository_identity, ''),
+		           NULLIF(wr.worker_remote_identity, ''),
+		           r.remote_identity
+		       ),
+		       wr.retained_count
+		FROM repositories r
+		JOIN worker_repositories wr ON wr.repository_id = r.id
+		JOIN sessions session ON session.id = ?
+		WHERE r.id = ? AND wr.worker_id = ?
+	`, claim.Session.ID, claim.Session.RepositoryID, claim.Attempt.WorkerID).Scan(
+		&claim.Repository.ID, &claim.Repository.Key, &claim.Repository.RemoteIdentity, &claim.Repository.RetainedCount)
+	if err != nil {
+		return claim, unavailable(err)
+	}
+	return claim, nil
+}
+
+type leaseState struct {
+	attemptState    string
+	executionID     string
+	executionState  string
+	outcomeContract protocol.OutcomeContract
+	digest          []byte
+	expiry          int64
+	cancel          bool
+}
+
+func loadLease(ctx context.Context, tx *sql.Tx, attemptID string) (leaseState, error) {
+	var value leaseState
+	var cancel int
+	err := tx.QueryRowContext(ctx, `
+		SELECT a.state, a.execution_id, e.state, run.outcome_contract,
+		       a.lease_digest, a.lease_expires_at, e.cancellation_requested
+		FROM attempts a
+		JOIN executions e ON e.id = a.execution_id
+		JOIN sessions session ON session.id = e.session_id
+		JOIN runs run ON run.id = session.run_id
+		WHERE a.id = ?
+	`, attemptID).Scan(&value.attemptState, &value.executionID, &value.executionState,
+		&value.outcomeContract, &value.digest, &value.expiry, &cancel)
+	if errors.Is(err, sql.ErrNoRows) {
+		return value, ErrNotFound
+	}
+	if err != nil {
+		return value, unavailable(err)
+	}
+	value.cancel = cancel != 0
+	return value, nil
+}
+
+func verifyActiveLease(value leaseState, token string, now int64) error {
+	if err := validateToken(token); err != nil {
+		return err
+	}
+	if !equalDigest(value.digest, digestToken(token)) || !isActive(value.attemptState) || value.expiry <= now {
+		return conflict("lease_not_owner", "the lease token does not own an active attempt")
+	}
+	return nil
+}
+
+func isActive(state string) bool { return state == "preparing" || state == "running" }
+func isTerminal(state string) bool {
+	return state == "succeeded" || state == "failed" || state == "cancelled" || state == "lost"
+}
+
+func (s *Store) StartAttempt(ctx context.Context, attemptID string, input protocol.StartAttemptRequest) (protocol.Attempt, error) {
+	if input.StartedFromSHA != "" && !validCommitSHA(input.StartedFromSHA) {
+		return protocol.Attempt{}, invalid("invalid_started_commit", "started_from_sha must be a full commit SHA")
+	}
+	now := s.now().UnixMilli()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return protocol.Attempt{}, unavailable(err)
+	}
+	defer tx.Rollback()
+	lease, err := loadLease(ctx, tx, attemptID)
+	if err != nil {
+		return protocol.Attempt{}, err
+	}
+	if err := verifyActiveLease(lease, input.LeaseToken, now); err != nil {
+		return protocol.Attempt{}, err
+	}
+	var pendingResumeSHA string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT session.pending_resume_sha
+		FROM sessions session
+		JOIN executions execution ON execution.session_id = session.id
+		WHERE execution.id = ?
+	`, lease.executionID).Scan(&pendingResumeSHA); err != nil {
+		return protocol.Attempt{}, unavailable(err)
+	}
+	if pendingResumeSHA != "" && input.StartedFromSHA != pendingResumeSHA {
+		return protocol.Attempt{}, conflict(
+			"resume_commit_mismatch",
+			"the Attempt did not start from the authoritative pending resume commit",
+		)
+	}
+	if lease.attemptState == "preparing" {
+		if input.RuntimeStarted {
+			return protocol.Attempt{}, conflict("invalid_transition", "the runtime cannot start before the Attempt")
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE attempts SET state = 'running', supervisor_pid = ?, process_identity = ?,
+			       process_group_id = ?, started_at = ?
+			WHERE id = ? AND state = 'preparing'
+		`, input.SupervisorPID, nullString(input.ProcessIdentity), input.ProcessGroupID, now, attemptID); err != nil {
+			return protocol.Attempt{}, unavailable(err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE executions SET state = 'running', updated_at = ? WHERE id = ? AND state = 'preparing'
+		`, now, lease.executionID); err != nil {
+			return protocol.Attempt{}, unavailable(err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE sessions SET state = 'running', started_at = COALESCE(started_at, ?),
+			       execution_owner = 'worker_attempt'
+			WHERE id = (SELECT session_id FROM executions WHERE id = ?) AND state = 'preparing'
+		`, now, lease.executionID); err != nil {
+			return protocol.Attempt{}, unavailable(err)
+		}
+	} else if lease.attemptState != "running" {
+		return protocol.Attempt{}, conflict("invalid_transition", "attempt cannot be started from its current state")
+	}
+	if input.RuntimeStarted {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE sessions
+			SET pending_resume_sha = CASE WHEN pending_resume_sha = ? THEN '' ELSE pending_resume_sha END
+			WHERE id = (SELECT session_id FROM executions WHERE id = ?) AND state = 'running'
+		`, input.StartedFromSHA, lease.executionID); err != nil {
+			return protocol.Attempt{}, unavailable(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return protocol.Attempt{}, unavailable(err)
+	}
+	return s.Attempt(ctx, attemptID)
+}
+
+func nullString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func (s *Store) Heartbeat(ctx context.Context, attemptID, token string) (protocol.HeartbeatResponse, error) {
+	now := s.now()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return protocol.HeartbeatResponse{}, unavailable(err)
+	}
+	defer tx.Rollback()
+	lease, err := loadLease(ctx, tx, attemptID)
+	if err != nil {
+		return protocol.HeartbeatResponse{}, err
+	}
+	if err := verifyActiveLease(lease, token, now.UnixMilli()); err != nil {
+		return protocol.HeartbeatResponse{}, err
+	}
+	expiry := now.Add(protocol.LeaseDuration)
+	if _, err := tx.ExecContext(ctx, `UPDATE attempts SET lease_expires_at = ? WHERE id = ?`, expiry.UnixMilli(), attemptID); err != nil {
+		return protocol.HeartbeatResponse{}, unavailable(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return protocol.HeartbeatResponse{}, unavailable(err)
+	}
+	return protocol.HeartbeatResponse{LeaseExpiresAt: expiry.UTC(), CancellationRequested: lease.cancel}, nil
+}
+
+func (s *Store) AppendEvents(ctx context.Context, attemptID string, input protocol.EventBatchRequest) error {
+	if len(input.Events) == 0 || len(input.Events) > protocol.MaxEventsPerBatch {
+		return invalid("invalid_event_batch", "an event batch must contain 1 through 100 events")
+	}
+	encoded, _ := json.Marshal(input)
+	if len(encoded) > protocol.MaxEventBatchBytes {
+		return invalid("event_batch_too_large", "event batch exceeds 256 KiB")
+	}
+	var previous int64 = -1
+	for _, event := range input.Events {
+		if event.Sequence < 0 || event.Sequence <= previous || strings.TrimSpace(event.Kind) == "" || len(event.Kind) > 100 {
+			return invalid("invalid_event", "event sequences must be non-negative and strictly increasing, with a kind")
+		}
+		if len(event.Payload) > protocol.MaxEventBytes {
+			return invalid("event_too_large", "one event exceeds 64 KiB")
+		}
+		if !json.Valid(event.Payload) {
+			return invalid("invalid_event", "event payload must be valid JSON")
+		}
+		previous = event.Sequence
+	}
+	now := s.now().UnixMilli()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return unavailable(err)
+	}
+	defer tx.Rollback()
+	lease, err := loadLease(ctx, tx, attemptID)
+	if err != nil {
+		return err
+	}
+	if err := verifyActiveLease(lease, input.LeaseToken, now); err != nil {
+		return err
+	}
+	var storedBytes int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(payload_bytes), 0) FROM attempt_events WHERE attempt_id = ?`, attemptID).Scan(&storedBytes); err != nil {
+		return unavailable(err)
+	}
+	type pendingEvent struct {
+		event protocol.AttemptEvent
+	}
+	var pending []pendingEvent
+	var maxSequence int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(sequence), -1) FROM attempt_events WHERE attempt_id = ?
+	`, attemptID).Scan(&maxSequence); err != nil {
+		return unavailable(err)
+	}
+	for _, event := range input.Events {
+		var kind string
+		var payload []byte
+		err := tx.QueryRowContext(ctx, `
+			SELECT kind, payload FROM attempt_events WHERE attempt_id = ? AND sequence = ?
+		`, attemptID, event.Sequence).Scan(&kind, &payload)
+		if err == nil {
+			if kind != event.Kind || !jsonEqual(payload, event.Payload) {
+				return conflict("event_conflict", "an event sequence was replayed with different content")
+			}
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return unavailable(err)
+		}
+		if event.Sequence <= maxSequence {
+			return conflict("event_out_of_order", "a new event sequence must follow stored events")
+		}
+		storedBytes += len(event.Payload)
+		pending = append(pending, pendingEvent{event: event})
+		maxSequence = event.Sequence
+	}
+	if storedBytes > protocol.MaxAttemptEventBytes {
+		return &ServiceError{Code: "event_budget_exceeded", Message: "attempt event storage exceeds 10 MiB", Status: 413}
+	}
+	for _, item := range pending {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO attempt_events(attempt_id, sequence, kind, payload, payload_bytes, server_time)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, attemptID, item.event.Sequence, item.event.Kind, []byte(item.event.Payload), len(item.event.Payload), now); err != nil {
+			return unavailable(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return unavailable(err)
+	}
+	return nil
+}
+
+func jsonEqual(a, b []byte) bool {
+	return bytes.Equal(a, b)
+}
+
+func (s *Store) Events(ctx context.Context, attemptID string, after int64, limit int) (protocol.AttemptEventPage, error) {
+	if after < -1 {
+		return protocol.AttemptEventPage{}, invalid("invalid_after", "after must be an integer of at least -1")
+	}
+	if limit < 1 || limit > protocol.MaxEventPageSize {
+		return protocol.AttemptEventPage{}, invalid("invalid_limit", "limit must be between 1 and 500")
+	}
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM attempts WHERE id = ?`, attemptID).Scan(&exists); err != nil {
+		return protocol.AttemptEventPage{}, unavailable(err)
+	}
+	if exists == 0 {
+		return protocol.AttemptEventPage{}, ErrNotFound
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT sequence, kind, payload, server_time
+		FROM attempt_events WHERE attempt_id = ? AND sequence > ?
+		ORDER BY sequence ASC
+		LIMIT ?
+	`, attemptID, after, limit+1)
+	if err != nil {
+		return protocol.AttemptEventPage{}, unavailable(err)
+	}
+	defer rows.Close()
+	events := make([]protocol.AttemptEvent, 0, limit+1)
+	for rows.Next() {
+		var event protocol.AttemptEvent
+		var payload []byte
+		var serverTime int64
+		if err := rows.Scan(&event.Sequence, &event.Kind, &payload, &serverTime); err != nil {
+			return protocol.AttemptEventPage{}, unavailable(err)
+		}
+		event.Payload = append(event.Payload[:0], payload...)
+		event.ServerTime = fromMillis(serverTime)
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return protocol.AttemptEventPage{}, unavailable(err)
+	}
+	page := protocol.AttemptEventPage{Events: events, NextAfter: after}
+	if len(events) > limit {
+		page.Events = events[:limit]
+		page.HasMore = true
+	}
+	if len(page.Events) > 0 {
+		page.NextAfter = page.Events[len(page.Events)-1].Sequence
+	}
+	return page, nil
+}
+
+func (s *Store) CompleteAttempt(ctx context.Context, attemptID string, input protocol.CompleteAttemptRequest) (protocol.Attempt, error) {
+	if input.State != "succeeded" && input.State != "failed" && input.State != "cancelled" {
+		return protocol.Attempt{}, invalid("invalid_terminal_state", "state must be succeeded, failed, or cancelled")
+	}
+	if len([]byte(input.Result)) > protocol.MaxResultBytes || len([]byte(input.Error)) > protocol.MaxErrorBytes {
+		return protocol.Attempt{}, &ServiceError{Code: "result_too_large", Message: "result or error exceeds its storage limit", Status: 413}
+	}
+	cost, err := attemptCostColumns(input.CostUSD, input.Usage, input.Models)
+	if err != nil {
+		return protocol.Attempt{}, err
+	}
+	if err := validateToken(input.LeaseToken); err != nil {
+		return protocol.Attempt{}, err
+	}
+	now := s.now().UnixMilli()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return protocol.Attempt{}, unavailable(err)
+	}
+	defer tx.Rollback()
+	lease, err := loadLease(ctx, tx, attemptID)
+	if err != nil {
+		return protocol.Attempt{}, err
+	}
+	if isTerminal(lease.attemptState) {
+		if lease.attemptState == "lost" || !equalDigest(lease.digest, digestToken(input.LeaseToken)) {
+			return protocol.Attempt{}, conflict("lease_not_owner", "the lease token does not own this terminal attempt")
+		}
+		if err := tx.Commit(); err != nil {
+			return protocol.Attempt{}, unavailable(err)
+		}
+		return s.Attempt(ctx, attemptID)
+	}
+	if err := verifyActiveLease(lease, input.LeaseToken, now); err != nil {
+		return protocol.Attempt{}, err
+	}
+	terminalMessage := ""
+	workState := protocol.WorkState(input.State)
+	failureReason := input.Error
+	var outcome protocol.WorkUpdate
+	hasOutcome := false
+	missingOutcomeFailure := false
+	if lease.outcomeContract == protocol.OutcomeAgentUpdate {
+		outcome, hasOutcome, err = attemptOutcome(ctx, tx, attemptID)
+		if err != nil {
+			return protocol.Attempt{}, err
+		}
+	}
+	if lease.cancel {
+		input.State, input.Result, input.Error = "cancelled", "", ""
+		workState, failureReason = protocol.WorkCancelled, ""
+		terminalMessage = "Cancelled by operator."
+	} else if lease.outcomeContract == protocol.OutcomeAgentUpdate {
+		if input.State == "succeeded" && !hasOutcome {
+			const missingOutcome = "Agent exited without reporting an outcome."
+			input.State, input.Result, input.Error = "failed", "", missingOutcome
+			workState, failureReason, terminalMessage = protocol.WorkFailed, missingOutcome, missingOutcome
+			missingOutcomeFailure = true
+		} else if input.State == "succeeded" {
+			// The Attempt succeeded because the agent completed its reporting
+			// contract. Work state remains the semantic outcome reported by the
+			// agent, and arbitrary final runtime prose is not interpreted.
+			input.Result, input.Error = "", ""
+			terminalMessage = outcome.Message
+			switch outcome.Status {
+			case protocol.WorkUpdateReady:
+				workState = protocol.WorkReady
+			case protocol.WorkUpdateNeedsInput:
+				workState = protocol.WorkNeedsInput
+			case protocol.WorkUpdateFailed:
+				workState, failureReason = protocol.WorkFailed, outcome.Message
+			case protocol.WorkUpdateNoChange:
+				workState = protocol.WorkNoChange
+			default:
+				return protocol.Attempt{}, conflict("outcome_missing", "the Attempt has no ending outcome report")
+			}
+		}
+	}
+	if input.State == "succeeded" && lease.attemptState != "running" {
+		return protocol.Attempt{}, conflict("invalid_transition", "only a running attempt can succeed")
+	}
+	var sessionID string
+	if err := tx.QueryRowContext(ctx, `SELECT session_id FROM executions WHERE id = ?`, lease.executionID).Scan(&sessionID); err != nil {
+		return protocol.Attempt{}, unavailable(err)
+	}
+	if missingOutcomeFailure {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE session_stages
+			SET state = 'failed', error = ?, completed_at = ?
+			WHERE session_id = ?
+			  AND position = (SELECT MAX(position) FROM session_stages WHERE session_id = ?)
+			  AND state = 'succeeded'
+		`, input.Error, now, sessionID, sessionID); err != nil {
+			return protocol.Attempt{}, unavailable(err)
+		}
+	}
+	var stageCount, succeededStages int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*), COALESCE(SUM(state = 'succeeded'), 0) FROM session_stages WHERE session_id = ?
+	`, sessionID).Scan(&stageCount, &succeededStages); err != nil {
+		return protocol.Attempt{}, unavailable(err)
+	}
+	// A one-stage Pipeline is the compatibility path for the former single
+	// prompt model. Accept direct Attempt completion from older test clients
+	// and synthetic backends while multi-stage Pipelines remain explicit.
+	if input.State == "succeeded" && stageCount == 1 && succeededStages == 0 {
+		result, err := tx.ExecContext(ctx, `
+			UPDATE session_stages SET state = 'succeeded', result = ?, error = '',
+			       started_at = COALESCE(started_at, ?), completed_at = ?
+			WHERE session_id = ? AND position = 0 AND state IN ('pending', 'running')
+		`, input.Result, now, now, sessionID)
+		if err != nil {
+			return protocol.Attempt{}, unavailable(err)
+		}
+		changed, _ := result.RowsAffected()
+		succeededStages += int(changed)
+	}
+	if input.State == "succeeded" && stageCount > 0 && succeededStages != stageCount {
+		return protocol.Attempt{}, conflict("pipeline_incomplete", "all Pipeline stages must succeed before the Attempt can succeed")
+	}
+	if input.State != "succeeded" && stageCount > 0 {
+		stageState := protocol.StageFailed
+		if input.State == "cancelled" {
+			stageState = protocol.StageCancelled
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE session_stages
+			SET state = CASE WHEN state = 'running' THEN ? ELSE 'cancelled' END,
+			    error = CASE WHEN state = 'running' THEN ? ELSE error END,
+			    completed_at = ?
+			WHERE session_id = ? AND state IN ('pending', 'running')
+		`, stageState, input.Error, now, sessionID); err != nil {
+			return protocol.Attempt{}, unavailable(err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE attempts SET state = ?, result = ?, error = ?, completed_at = ?,
+		       cost_usd = ?, input_tokens = ?, cache_creation_input_tokens = ?,
+		       cache_read_input_tokens = ?, output_tokens = ?, models = ?
+		WHERE id = ? AND state IN ('preparing', 'running')
+	`, input.State, nullString(input.Result), nullString(input.Error), now,
+		cost.costUSD, cost.inputTokens, cost.cacheCreationInputTokens,
+		cost.cacheReadInputTokens, cost.outputTokens, cost.models, attemptID); err != nil {
+		return protocol.Attempt{}, unavailable(err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE executions SET state = ?, updated_at = ?
+		WHERE id = ? AND state IN ('preparing', 'running')
+	`, input.State, now, lease.executionID); err != nil {
+		return protocol.Attempt{}, unavailable(err)
+	}
+	if hasOutcome && workState == protocol.WorkNeedsInput {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE sessions SET state = 'needs-input', terminal_at = NULL, result = NULL,
+			       failure_reason = NULL, terminal_message = ?, question = ?,
+			       checkpoint_sha = ?, pending_resume_sha = ?, checkpoint_published = ?,
+			       answer = '', answered_by = '', execution_owner = 'none'
+			WHERE id = (SELECT session_id FROM executions WHERE id = ?)
+			  AND state = 'running'
+		`, terminalMessage, outcome.Message, outcome.CheckpointSHA, outcome.CheckpointSHA,
+			outcome.CheckpointPublished, lease.executionID); err != nil {
+			return protocol.Attempt{}, unavailable(err)
+		}
+	} else if hasOutcome && input.State == "succeeded" {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE sessions SET state = ?, terminal_at = ?, result = NULL, failure_reason = ?,
+			       terminal_message = ?,
+			       pull_request_url = COALESCE(NULLIF(?, ''), pull_request_url),
+			       pull_request_head_branch = COALESCE(NULLIF(?, ''), pull_request_head_branch),
+			       pull_request_head_sha = COALESCE(NULLIF(?, ''), pull_request_head_sha),
+			       execution_owner = 'none'
+			WHERE id = (SELECT session_id FROM executions WHERE id = ?)
+			  AND state = 'running'
+		`, workState, now, nullString(failureReason), terminalMessage, outcome.PullRequestURL,
+			outcome.PullRequestHeadBranch, outcome.PullRequestHeadSHA, lease.executionID); err != nil {
+			return protocol.Attempt{}, unavailable(err)
+		}
+	} else if hasOutcome && outcome.Status == protocol.WorkUpdateNeedsInput {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE sessions SET state = ?, terminal_at = ?, result = ?, failure_reason = ?,
+			       terminal_message = ?, checkpoint_sha = ?, pending_resume_sha = ?,
+			       checkpoint_published = ?, execution_owner = 'none'
+			WHERE id = (SELECT session_id FROM executions WHERE id = ?)
+			  AND state IN ('preparing', 'running')
+		`, workState, now, nullString(input.Result), nullString(failureReason), terminalMessage,
+			outcome.CheckpointSHA, outcome.CheckpointSHA, outcome.CheckpointPublished,
+			lease.executionID); err != nil {
+			return protocol.Attempt{}, unavailable(err)
+		}
+	} else if hasOutcome && outcome.Status == protocol.WorkUpdateReady {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE sessions SET state = ?, terminal_at = ?, result = ?, failure_reason = ?,
+			       terminal_message = ?, pull_request_url = ?, pull_request_head_branch = ?,
+			       pull_request_head_sha = ?, execution_owner = 'none'
+			WHERE id = (SELECT session_id FROM executions WHERE id = ?)
+			  AND state IN ('preparing', 'running')
+		`, workState, now, nullString(input.Result), nullString(failureReason), terminalMessage,
+			outcome.PullRequestURL, outcome.PullRequestHeadBranch, outcome.PullRequestHeadSHA,
+			lease.executionID); err != nil {
+			return protocol.Attempt{}, unavailable(err)
+		}
+	} else if _, err := tx.ExecContext(ctx, `
+		UPDATE sessions SET state = ?, terminal_at = ?, result = ?, failure_reason = ?,
+		       terminal_message = ?, execution_owner = 'none'
+		WHERE id = (SELECT session_id FROM executions WHERE id = ?)
+		  AND state IN ('preparing', 'running')
+	`, workState, now, nullString(input.Result), nullString(failureReason), terminalMessage, lease.executionID); err != nil {
+		return protocol.Attempt{}, unavailable(err)
+	}
+	if err := updateRunLifecycle(ctx, tx, lease.executionID, now); err != nil {
+		return protocol.Attempt{}, err
+	}
+	var workID string
+	if workState == protocol.WorkReady {
+		if err := tx.QueryRowContext(ctx,
+			`SELECT session_id FROM executions WHERE id = ?`, lease.executionID).Scan(&workID); err != nil {
+			return protocol.Attempt{}, unavailable(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return protocol.Attempt{}, unavailable(err)
+	}
+	// INV-8, after the commit and never inside it.
+	//
+	// This is the earliest point a merge can be considered, and the reason is
+	// ordering rather than taste. The agent reports its ready outcome DURING a
+	// stage, so at AppendAgentUpdate time the reviewing stage has not completed
+	// and has recorded no verdict yet; a merge decided there would see the
+	// empty verdict every time and never merge. By here every stage has
+	// succeeded, the verdict is durable, the Work is terminal with terminal_at
+	// set, and sessions carries the delivery evidence.
+	//
+	// A merge that cannot happen does not make a delivered Work undelivered, so
+	// the error is logged into the Work rather than returned.
+	if workID != "" {
+		if err := maybeAutoMerge(ctx, s, workID); err != nil {
+			recordMergeRefusal(ctx, s, workID, err.Error())
+		}
+	}
+	return s.Attempt(ctx, attemptID)
+}
+
+func (s *Store) Attempt(ctx context.Context, id string) (protocol.Attempt, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, execution_id, worker_id, attempt_number, state, lease_expires_at,
+		       supervisor_pid, process_identity, process_group_id, result, error,
+		       started_at, completed_at, created_at,
+		       cost_usd, input_tokens, cache_creation_input_tokens,
+		       cache_read_input_tokens, output_tokens, models
+		FROM attempts WHERE id = ?
+	`, id)
+	value, err := scanAttempt(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return value, ErrNotFound
+	}
+	if err != nil {
+		return value, unavailable(err)
+	}
+	return value, nil
+}
+
+type ExpiredLease struct {
+	AttemptID   string
+	ExecutionID string
+}
+
+func (s *Store) SweepExpired(ctx context.Context) ([]ExpiredLease, error) {
+	now := s.now().UnixMilli()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM claim_requests
+		WHERE attempt_id IS NULL AND created_at < ?
+	`, now-protocol.EmptyClaimTTL.Milliseconds()); err != nil {
+		return nil, unavailable(err)
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT attempt.id, attempt.execution_id
+		FROM attempts attempt
+		JOIN executions execution ON execution.id = attempt.execution_id
+		JOIN sessions session ON session.id = execution.session_id
+		WHERE attempt.state IN ('preparing', 'running')
+		  AND attempt.lease_expires_at <= ?
+		  AND session.execution_backend IN (?, ?)
+	`, now, protocol.BackendPersistent, protocol.BackendDocker)
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	var values []ExpiredLease
+	for rows.Next() {
+		var value ExpiredLease
+		if err := rows.Scan(&value.AttemptID, &value.ExecutionID); err != nil {
+			rows.Close()
+			return nil, unavailable(err)
+		}
+		values = append(values, value)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, unavailable(err)
+	}
+	for _, value := range values {
+		result, err := tx.ExecContext(ctx, `
+			UPDATE attempts SET state = 'lost', error = 'lease expired', completed_at = ?
+			WHERE id = ? AND state IN ('preparing', 'running') AND lease_expires_at <= ?
+			  AND execution_id IN (
+			      SELECT execution.id
+			      FROM executions execution
+			      JOIN sessions session ON session.id = execution.session_id
+			      WHERE session.execution_backend IN (?, ?)
+			  )
+		`, now, value.AttemptID, now, protocol.BackendPersistent, protocol.BackendDocker)
+		if err != nil {
+			return nil, unavailable(err)
+		}
+		changed, _ := result.RowsAffected()
+		if changed == 1 {
+			outcome, hasOutcome, err := attemptOutcome(ctx, tx, value.AttemptID)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE executions SET state = 'failed', updated_at = ?
+				WHERE id = ? AND state IN ('preparing', 'running')
+				`, now, value.ExecutionID); err != nil {
+				return nil, unavailable(err)
+			}
+			if hasOutcome && outcome.Status == protocol.WorkUpdateNeedsInput {
+				if _, err := tx.ExecContext(ctx, `
+					UPDATE sessions SET checkpoint_sha = ?, pending_resume_sha = ?, checkpoint_published = ?
+					WHERE id = (SELECT session_id FROM executions WHERE id = ?)
+					  AND state IN ('preparing', 'running')
+				`, outcome.CheckpointSHA, outcome.CheckpointSHA, outcome.CheckpointPublished,
+					value.ExecutionID); err != nil {
+					return nil, unavailable(err)
+				}
+			} else if hasOutcome && outcome.Status == protocol.WorkUpdateReady {
+				if _, err := tx.ExecContext(ctx, `
+					UPDATE sessions SET pull_request_url = ?, pull_request_head_branch = ?,
+					       pull_request_head_sha = ?
+					WHERE id = (SELECT session_id FROM executions WHERE id = ?)
+					  AND state IN ('preparing', 'running')
+				`, outcome.PullRequestURL, outcome.PullRequestHeadBranch,
+					outcome.PullRequestHeadSHA, value.ExecutionID); err != nil {
+					return nil, unavailable(err)
+				}
+			}
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE sessions SET state = 'failed', terminal_at = ?, failure_reason = 'lease expired',
+				       terminal_message = 'lease expired', execution_owner = 'none'
+				WHERE id = (SELECT session_id FROM executions WHERE id = ?)
+				  AND state IN ('preparing', 'running')
+			`, now, value.ExecutionID); err != nil {
+				return nil, unavailable(err)
+			}
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE session_stages
+				SET state = CASE WHEN state = 'running' THEN 'failed' ELSE 'cancelled' END,
+				    error = CASE WHEN state = 'running' THEN 'lease expired' ELSE error END,
+				    completed_at = ?
+				WHERE session_id = (SELECT session_id FROM executions WHERE id = ?)
+				  AND state IN ('pending', 'running')
+			`, now, value.ExecutionID); err != nil {
+				return nil, unavailable(err)
+			}
+			if err := updateRunLifecycle(ctx, tx, value.ExecutionID, now); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, unavailable(err)
+	}
+	return values, nil
+}
+
+// attemptCost is the six nullable cost columns of an attempt row, ready to
+// bind. Every field is nil when the completion carried nothing, which stores
+// NULL: not measured, as opposed to zero.
+type attemptCost struct {
+	costUSD                  any
+	inputTokens              any
+	cacheCreationInputTokens any
+	cacheReadInputTokens     any
+	outputTokens             any
+	models                   any
+}
+
+// maxModelsBytes bounds the serialized per-model breakdown.
+const maxModelsBytes = 8192
+
+// attemptCostColumns validates a completion's cost, usage, and per-model
+// breakdown and turns them into their column values. Any violation is
+// invalid_cost and nothing is stored. Non-finite numbers never reach this
+// check because JSON cannot carry them.
+func attemptCostColumns(costUSD *float64, usage *protocol.Usage, models map[string]protocol.ModelUsage) (attemptCost, error) {
+	var columns attemptCost
+	if costUSD != nil {
+		if *costUSD < 0 {
+			return attemptCost{}, invalid("invalid_cost", "cost_usd must not be negative")
+		}
+		columns.costUSD = *costUSD
+	}
+	if usage != nil {
+		if usage.InputTokens < 0 || usage.CacheCreationInputTokens < 0 ||
+			usage.CacheReadInputTokens < 0 || usage.OutputTokens < 0 {
+			return attemptCost{}, invalid("invalid_cost", "usage counts must not be negative")
+		}
+		columns.inputTokens = usage.InputTokens
+		columns.cacheCreationInputTokens = usage.CacheCreationInputTokens
+		columns.cacheReadInputTokens = usage.CacheReadInputTokens
+		columns.outputTokens = usage.OutputTokens
+	}
+	if models != nil {
+		if len(models) == 0 {
+			return attemptCost{}, invalid("invalid_cost", "models must name at least one model when present")
+		}
+		for name, model := range models {
+			if name == "" {
+				return attemptCost{}, invalid("invalid_cost", "models must not carry an empty model name")
+			}
+			if model.CostUSD < 0 || model.InputTokens < 0 || model.CacheCreationInputTokens < 0 ||
+				model.CacheReadInputTokens < 0 || model.OutputTokens < 0 {
+				return attemptCost{}, invalid("invalid_cost", "models must not carry a negative cost or count")
+			}
+		}
+		encoded, err := json.Marshal(models)
+		if err != nil {
+			return attemptCost{}, invalid("invalid_cost", "models could not be serialized")
+		}
+		if len(encoded) > maxModelsBytes {
+			return attemptCost{}, invalid("invalid_cost", "models exceeds its storage limit")
+		}
+		columns.models = string(encoded)
+	}
+	return columns, nil
+}

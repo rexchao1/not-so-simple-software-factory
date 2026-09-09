@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+#
+# planning-save-route <project> <route.md>
+#
+# Saves a route to the planning API and opens a checkpoint row for every
+# numbered line that does not have one yet.
+#
+# The route file is the source of the project's title, its statement, and the
+# list of checkpoints. It is parsed here, once, rather than by a prompt:
+#
+#   # Route: <title>          -> the project title
+#   ## Boulder                -> the project statement, to the next ## heading
+#   ## Checkpoints            -> one row per "N. <name>: <summary>" line
+#
+# Rules this encodes so no caller has to remember them:
+#
+#   - The project is written before any checkpoint under it. A checkpoint
+#     saved first is 404 planning_project_not_found (planning-api.md).
+#   - An existing checkpoint row is read, never rewritten. The route names a
+#     checkpoint in one line; the PRD is the long text, and a re-saved route
+#     must not blank a PRD that was written since. A whole-resource PUT would
+#     do exactly that, because a field left out of a body is written empty.
+#   - A checkpoint number comes from the line, not from its position, so a
+#     route that starts at 2 or skips a built rung still lands on the right
+#     rows.
+#
+# Exit: 0 saved, 1 API error, 2 usage or a route this cannot parse.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# Every request in this skill goes through the dark factory's one HTTP client:
+# it owns FACTORY_BASE, the Content-Type rule, the missing Origin header, and
+# the error envelope. Resolved from this script's own directory so it works
+# from the repo and from ~/.claude/skills alike.
+API="$SCRIPTS/../../dark-factory/scripts/factory-api"
+
+usage() { echo "usage: planning-save-route <project> <route.md>" >&2; exit 2; }
+[ "$#" -eq 2 ] || usage
+[ -x "$API" ] || { echo "error: the dark-factory factory-api is not at $API" >&2
+  echo "hint: light-factory reaches the server through dark-factory's client. Install both." >&2; exit 2; }
+
+project="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+route_file="$2"
+[[ "$project" =~ ^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$ ]] || {
+  echo "error: '$1' is not a project slug: lowercase letters and digits, single dashes or underscores between them" >&2; exit 2; }
+[ -f "$route_file" ] || { echo "error: no such route file: $route_file" >&2; exit 2; }
+
+body="$(cat "$route_file")"
+
+title="$(sed -n 's/^#[[:space:]]*Route:[[:space:]]*//p' "$route_file" | head -n1 \
+  | sed -e 's/[[:space:]]*$//')"
+[ -n "$title" ] || { echo "error: the route must open with '# Route: <title>'" >&2; exit 2; }
+
+# A section runs from its own ## heading to the next ## heading.
+section() { awk -v want="$1" '
+  /^##[[:space:]]/ { inside = (tolower($0) ~ "^##[[:space:]]*" want "[[:space:]]*$"); next }
+  inside { print }' "$route_file"; }
+
+# The server trims surrounding whitespace on every field, so the section is
+# sent as it was written.
+statement="$(section "boulder")"
+lines="$(section "checkpoints" | grep -E '^[[:space:]]*[0-9]+\.' || true)"
+[ -n "$lines" ] || { echo "error: no numbered checkpoint lines under a '## Checkpoints' heading" >&2; exit 2; }
+
+payload="$(jq -nc --arg t "$title" --arg s "$statement" --arg r "$body" \
+  '{title: $t, statement: $s, route: $r}')"
+"$API" PUT "/api/v1/planning/projects/$project" "$payload" >/dev/null || exit 1
+echo "project $project  $title"
+
+trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+
+err="$(mktemp)"
+trap 'rm -f "$err"' EXIT
+created=0; kept=0
+while IFS= read -r line; do
+  [ -n "$(trim "$line")" ] || continue
+  num="$(printf '%s' "$line" | sed -n 's/^[[:space:]]*\([0-9][0-9]*\)\..*/\1/p')"
+  [ -n "$num" ] || continue
+  rest="$(trim "${line#*.}")"
+  case "$rest" in
+    *:*) cp_title="$(trim "${rest%%:*}")"; cp_summary="$(trim "${rest#*:}")" ;;
+    *)   cp_title="$rest"; cp_summary="" ;;
+  esac
+  [ -n "$cp_title" ] || { echo "error: checkpoint line $num has no name: $line" >&2; exit 2; }
+
+  path="/api/v1/planning/projects/$project/checkpoints/$((10#$num))"
+  if "$API" GET "$path" >/dev/null 2>"$err"; then
+    printf 'kept    %s  %s\n' "$num" "$cp_title"
+    kept=$((kept + 1))
+    continue
+  fi
+  # Only a 404 means "no row yet". Anything else is the server telling us
+  # something, and creating a row on top of it would be guessing.
+  grep -q 'error: not_found' "$err" || { cat "$err" >&2; exit 1; }
+
+  row="$(jq -nc --arg t "$cp_title" --arg s "$cp_summary" '{title: $t, summary: $s, body: ""}')"
+  "$API" PUT "$path" "$row" >/dev/null || exit 1
+  printf 'created %s  %s\n' "$num" "$cp_title"
+  created=$((created + 1))
+done <<< "$lines"
+
+echo "route saved: $created checkpoint row(s) created, $kept left alone"

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="880" viewBox="0 0 1500 880" role="img" aria-labelledby="title desc">
+  <title id="title">Automatic bug and security remediation</title>
+  <desc id="desc">Two concrete factory workflows show a product bug and a security finding moving from detection to evidence-backed pull requests with human review.</desc>
+  <defs>
+    <filter id="s" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="7" stdDeviation="12" flood-color="#172033" flood-opacity=".08"/></filter>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 10 5 0 10z" fill="#7D8AA5"/></marker>
+    <style>.t{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;fill:#172033}.h{font-size:38px;font-weight:750}.sub{font-size:19px;fill:#657089}.cap{font-size:14px;font-weight:750;letter-spacing:1.2px}.label{font-size:16px;font-weight:700}.body{font-size:14px;fill:#526078}.card{fill:#fff;stroke:#DCE2EE;stroke-width:2}.line{fill:none;stroke:#7D8AA5;stroke-width:3;marker-end:url(#a)}</style>
+  </defs>
+  <rect width="1500" height="880" rx="28" fill="#F7F8FC"/>
+  <text class="t h" x="64" y="70">From detection to a reviewable fix</text>
+  <text class="t sub" x="64" y="106">The factory does not remove human review. It removes the idle time before useful evidence exists.</text>
+
+  <rect x="52" y="157" width="1396" height="262" rx="24" fill="#F1F7FF" stroke="#C9D9FA" stroke-width="2"/>
+  <text class="t cap" x="84" y="197" fill="#2E5CC2">EXAMPLE 01 · PRODUCT BUG</text>
+  <g filter="url(#s)"><rect class="card" x="84" y="225" width="184" height="117" rx="17"/><rect class="card" x="302" y="225" width="184" height="117" rx="17"/><rect class="card" x="520" y="225" width="184" height="117" rx="17"/><rect class="card" x="738" y="225" width="184" height="117" rx="17"/><rect class="card" x="956" y="225" width="184" height="117" rx="17"/><rect x="1174" y="225" width="234" height="117" rx="17" fill="#E5F6F1" stroke="#A7DCCD" stroke-width="2"/></g>
+  <g class="t label" text-anchor="middle"><text x="176" y="263">Detect</text><text x="394" y="263">Reproduce</text><text x="612" y="263">Triage</text><text x="830" y="263">Implement</text><text x="1048" y="263">Prove</text><text x="1291" y="263">Human review</text></g>
+  <g class="t body" text-anchor="middle"><text x="176" y="291">monitor creates issue</text><text x="176" y="313">with sanitized context</text><text x="394" y="291">browser confirms</text><text x="394" y="313">checkout failure</text><text x="612" y="291">find code path and</text><text x="612" y="313">write acceptance</text><text x="830" y="291">patch smallest</text><text x="830" y="313">cohesive change</text><text x="1048" y="291">tests + CI +</text><text x="1048" y="313">behavior video</text><text x="1291" y="291">evidence-backed PR</text><text x="1291" y="313">ready in the queue</text></g>
+  <path class="line" d="M268 283H302M486 283H520M704 283H738M922 283H956M1140 283H1174"/>
+  <rect x="84" y="364" width="1324" height="32" rx="10" fill="#DDEAFE"/><text class="t body" x="746" y="386" text-anchor="middle" fill="#244EAD">Outcome: the team reviews a fix, not an uninvestigated backlog item.</text>
+
+  <rect x="52" y="453" width="1396" height="262" rx="24" fill="#FFF8F5" stroke="#F1D6CD" stroke-width="2"/>
+  <text class="t cap" x="84" y="493" fill="#C14E3F">EXAMPLE 02 · SECURITY FINDING</text>
+  <g filter="url(#s)"><rect class="card" x="84" y="521" width="184" height="117" rx="17"/><rect class="card" x="302" y="521" width="184" height="117" rx="17"/><rect class="card" x="520" y="521" width="184" height="117" rx="17"/><rect class="card" x="738" y="521" width="184" height="117" rx="17"/><rect class="card" x="956" y="521" width="184" height="117" rx="17"/><rect x="1174" y="521" width="234" height="117" rx="17" fill="#E5F6F1" stroke="#A7DCCD" stroke-width="2"/></g>
+  <g class="t label" text-anchor="middle"><text x="176" y="559">Scan</text><text x="394" y="559">Validate</text><text x="612" y="559">Bound risk</text><text x="830" y="559">Patch</text><text x="1048" y="559">Rescan</text><text x="1291" y="559">Human review</text></g>
+  <g class="t body" text-anchor="middle"><text x="176" y="587">scanner reports</text><text x="176" y="609">vulnerable package</text><text x="394" y="587">confirm reachable</text><text x="394" y="609">code and version</text><text x="612" y="587">define allowed</text><text x="612" y="609">dependency change</text><text x="830" y="587">upgrade and adjust</text><text x="830" y="609">affected code</text><text x="1048" y="587">security + regression</text><text x="1048" y="609">checks pass</text><text x="1291" y="587">risk and evidence</text><text x="1291" y="609">made explicit</text></g>
+  <path class="line" d="M268 579H302M486 579H520M704 579H738M922 579H956M1140 579H1174"/>
+  <rect x="84" y="660" width="1324" height="32" rx="10" fill="#FCE4DE"/><text class="t body" x="746" y="682" text-anchor="middle" fill="#A74034">Outcome: the finding becomes a bounded change with proof, while the security owner keeps approval.</text>
+  <text class="t sub" x="750" y="790" text-anchor="middle">Automation forces progress through the waiting, checking and retrying that usually slows teams down.</text>
+  <rect x="414" y="818" width="672" height="42" rx="12" fill="#172033"/><text x="750" y="845" text-anchor="middle" font-family="Inter,ui-sans-serif,system-ui" font-size="15" font-weight="700" fill="#fff">DETECT → UNDERSTAND → CHANGE → PROVE → REVIEW</text>
+</svg>

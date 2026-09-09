@@ -1,0 +1,522 @@
+#!/usr/bin/env bash
+# skills - manage the skills in this repo and the copies installed into the
+# user-level skill directories that Claude Code and Codex read.
+#
+# Usage:
+#   skills status                              skills, home instructions, and hooks: what is here, what is installed, what drifted
+#   skills new <name>                          scaffold skills/<name>/SKILL.md
+#   skills install [--targets t] [--only a,b] [--dry-run] [--force]
+#                                              skills, plus the home instructions file unless --only narrows to skills
+#   skills uninstall <name>... [--targets t] [--dry-run]   drop installed copies, keep the source
+#   skills remove <name>... --yes              uninstall everywhere and delete the source
+#   skills lint                                frontmatter lint
+#   skills test                                lint, then the discovery canary
+#   skills home status                         whether each target holds this repo's home instructions file
+#   skills home install [--targets t] [--dry-run] [--force]
+#   skills hooks status                        which of this repo's hooks each target holds
+#   skills hooks install [--targets t] [--dry-run] [--force]
+
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+src="$here/skills"
+all_targets="claude codex"
+
+dest_for() {
+  case "$1" in
+    claude) printf '%s\n' "$HOME/.claude/skills" ;;
+    codex)  printf '%s\n' "$HOME/.codex/skills" ;;
+    *) echo "skills: unknown target '$1' (known: $all_targets)" >&2; exit 2 ;;
+  esac
+}
+
+# The comment block at the top of this file, up to the first line that is not a
+# comment, is the usage text.
+usage() { awk 'NR>1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"; }
+
+# Directory entries only, so dotted directories such as Codex's own
+# ~/.codex/skills/.system are never listed and never touched.
+dirs_in() { local d="$1"; [ -d "$d" ] || return 0; for p in "$d"/*/; do [ -d "$p" ] || continue; basename "$p"; done; }
+
+repo_skills() { dirs_in "$src"; }
+
+is_repo_skill() { [ -d "$src/$1" ]; }
+
+# current | differs | missing
+state_of() {
+  local name="$1" dest="$2"
+  if [ ! -d "$dest/$name" ]; then echo missing
+  elif diff -rq -x .DS_Store "$src/$name" "$dest/$name" >/dev/null 2>&1; then echo current
+  else echo differs
+  fi
+}
+
+cmd_status() {
+  local names; names="$(repo_skills)"
+  if [ -z "$names" ]; then echo "no skills in $src"; else
+    printf '%-24s %-10s %-10s %s\n' SKILL CLAUDE CODEX INVOCABLE
+    while read -r name; do
+      [ -n "$name" ] || continue
+      local inv; inv="$(sed -n 's/^user-invocable:[[:space:]]*\([^[:space:]]*\).*/\1/p' "$src/$name/SKILL.md" 2>/dev/null | head -n1)"
+      printf '%-24s %-10s %-10s %s\n' "$name" \
+        "$(state_of "$name" "$(dest_for claude)")" \
+        "$(state_of "$name" "$(dest_for codex)")" \
+        "${inv:-?}"
+    done <<< "$names"
+  fi
+
+  local found=0
+  for target in $all_targets; do
+    local dest; dest="$(dest_for "$target")"
+    while read -r name; do
+      [ -n "$name" ] || continue
+      is_repo_skill "$name" && continue
+      [ "$found" -eq 0 ] && { echo; echo "installed but not in this repo (unmanaged, this repo does not own these):"; found=1; }
+      echo "  $target  $name"
+    done <<< "$(dirs_in "$dest")"
+  done
+
+  echo
+  home_status
+
+  echo
+  if command -v jq >/dev/null; then
+    hooks_status
+  else
+    echo "hooks: jq is not on PATH, so hook state is unknown"
+  fi
+}
+
+cmd_new() {
+  local name="${1:-}"
+  [ -n "$name" ] || { echo "skills new: needs a name" >&2; exit 2; }
+  case "$name" in *[!a-z0-9-]*|-*|*-) echo "skills new: '$name' must be lowercase kebab-case" >&2; exit 2 ;; esac
+  [ -e "$src/$name" ] && { echo "skills new: $src/$name already exists" >&2; exit 2; }
+  mkdir -p "$src/$name"
+  cat > "$src/$name/SKILL.md" <<SKILLMD
+---
+name: $name
+description: >-
+  One or two sentences on what this does.
+  Then a sentence starting with "Use when" that says exactly when to load it.
+user-invocable: false
+---
+
+# $name
+
+What this skill does, written to be read by an agent with no other context.
+
+## Steps
+
+1. First step.
+2. Second step.
+SKILLMD
+  echo "created $src/$name/SKILL.md"
+  echo "edit it, then: bin/skills install --only $name"
+}
+
+cmd_install() {
+  local targets="$all_targets" only="" dry=0 force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --targets) targets="$(printf '%s' "$2" | tr ',' ' ')"; shift 2 ;;
+      --only) only="$(printf '%s' "$2" | tr ',' ' ')"; shift 2 ;;
+      --dry-run) dry=1; shift ;;
+      --force) force=1; shift ;;
+      *) echo "skills install: unknown argument '$1'" >&2; exit 2 ;;
+    esac
+  done
+
+  local names="${only:-$(repo_skills)}"
+  for name in $names; do
+    is_repo_skill "$name" || { echo "skills install: no such skill '$name' in $src" >&2; exit 2; }
+  done
+
+  "$here/tests/lint.sh"
+
+  for target in $targets; do
+    local dest; dest="$(dest_for "$target")"
+    for name in $names; do
+      if [ "$dry" -eq 1 ]; then echo "would install $name -> $dest/$name"; continue; fi
+      mkdir -p "$dest"
+      rm -rf "$dest/$name"
+      cp -R "$src/$name" "$dest/$name"
+      echo "installed $name -> $dest/$name"
+    done
+  done
+
+  # The home instructions file rides along with a full install and stays out of
+  # the way of a narrowed one: --only names skills, and home is not a skill.
+  # It goes last so a refusal over a drifted target cannot stop the skills from
+  # landing; the human still sees the refusal and the non-zero exit.
+  if [ -z "$only" ]; then
+    echo
+    local hargs
+    hargs="--targets $(printf '%s' "$targets" | tr ' ' ',')"
+    if [ "$dry" -eq 1 ]; then hargs="$hargs --dry-run"; fi
+    if [ "$force" -eq 1 ]; then hargs="$hargs --force"; fi
+    home_install $hargs
+  fi
+}
+
+cmd_uninstall() {
+  local targets="$all_targets" dry=0 unmanaged=0 names=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --targets) targets="$(printf '%s' "$2" | tr ',' ' ')"; shift 2 ;;
+      --dry-run) dry=1; shift ;;
+      --unmanaged) unmanaged=1; shift ;;
+      -*) echo "skills uninstall: unknown argument '$1'" >&2; exit 2 ;;
+      *) names="$names $1"; shift ;;
+    esac
+  done
+  [ -n "$names" ] || { echo "skills uninstall: needs at least one skill name" >&2; exit 2; }
+
+  for name in $names; do
+    case "$name" in .*|*/*) echo "skills uninstall: refusing the path '$name'" >&2; exit 2 ;; esac
+    if ! is_repo_skill "$name" && [ "$unmanaged" -eq 0 ]; then
+      echo "skills uninstall: '$name' is not in $src, so this repo does not own it." >&2
+      echo "  Pass --unmanaged to remove it from the target directories anyway." >&2
+      exit 2
+    fi
+  done
+
+  for target in $targets; do
+    local dest; dest="$(dest_for "$target")"
+    for name in $names; do
+      if [ ! -d "$dest/$name" ]; then echo "not installed  $target  $name"; continue; fi
+      if [ "$dry" -eq 1 ]; then echo "would uninstall $dest/$name"; continue; fi
+      rm -rf "$dest/$name"
+      echo "uninstalled $dest/$name"
+    done
+  done
+}
+
+cmd_remove() {
+  local yes=0 names=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yes) yes=1; shift ;;
+      -*) echo "skills remove: unknown argument '$1'" >&2; exit 2 ;;
+      *) names="$names $1"; shift ;;
+    esac
+  done
+  [ -n "$names" ] || { echo "skills remove: needs at least one skill name" >&2; exit 2; }
+  for name in $names; do
+    is_repo_skill "$name" || { echo "skills remove: no such skill '$name' in $src" >&2; exit 2; }
+  done
+
+  if [ "$yes" -eq 0 ]; then
+    echo "skills remove would delete, permanently in the targets and from the working tree:"
+    for name in $names; do
+      for target in $all_targets; do
+        local dest; dest="$(dest_for "$target")"
+        [ -d "$dest/$name" ] && echo "  $dest/$name"
+      done
+      echo "  $src/$name"
+    done
+    echo "Re-run with --yes to do it. The source is recoverable from git, the installed copies are not."
+    exit 1
+  fi
+
+  cmd_uninstall $names
+  for name in $names; do
+    rm -rf "${src:?}/$name"
+    echo "deleted $src/$name"
+  done
+}
+
+home_dir="$here/home"
+# The two files, in the order they are reported. CLAUDE.md is one line, an
+# @AGENTS.md import; AGENTS.md carries the rules. Both go to the same directory.
+home_files="CLAUDE.md AGENTS.md"
+
+# The third managed thing: the instructions a target reads before every session
+# in every project, whatever the project is. One source of truth here, copied
+# out, same as a skill.
+#
+# Claude Code reads ~/.claude/CLAUDE.md, which imports ~/.claude/AGENTS.md
+# beside it. Codex has no user-level instructions file that
+# docs/harness-notes.md verifies, so it gets no row and is skipped by name
+# rather than silently; give it one the day the notes say what the path is.
+home_dir_for() {
+  case "$1" in
+    claude) printf '%s\n' "$HOME/.claude" ;;
+    codex)  printf '' ;;
+    *) echo "skills: unknown target '$1' (known: $all_targets)" >&2; exit 2 ;;
+  esac
+}
+
+home_have_src() {
+  local n
+  for n in $home_files; do
+    [ -f "$home_dir/$n" ] || { echo "skills home: missing $home_dir/$n" >&2; exit 2; }
+  done
+}
+
+# current | differs | missing, for one file name against one target directory
+home_state() {
+  local name="$1" f="$2/$1"
+  if [ ! -f "$f" ]; then echo missing
+  elif cmp -s "$home_dir/$name" "$f"; then echo current
+  else echo differs
+  fi
+}
+
+# Line counts rather than a verdict on who wrote the target. This repo keeps no
+# record of what it wrote, so it cannot tell its own older copy from a file
+# you typed by hand; it can only say how far apart the two are and let you decide.
+home_counts() {
+  local name="$1" f="$2/$1" d mine theirs added removed
+  mine="$(wc -l < "$home_dir/$name" | tr -d " ")"
+  theirs="$(wc -l < "$f" | tr -d " ")"
+  d="$(diff "$home_dir/$name" "$f" || true)"
+  added="$(printf '%s\n' "$d" | grep -c '^>' || true)"
+  removed="$(printf '%s\n' "$d" | grep -c '^<' || true)"
+  printf 'source %s lines, target %s lines, %s line(s) only there, %s line(s) only here\n' \
+    "$mine" "$theirs" "$added" "$removed"
+}
+
+cmd_home() {
+  local sub="${1:-status}"
+  [ $# -gt 0 ] && shift || true
+  case "$sub" in
+    status)  home_status "$@" ;;
+    install) home_install "$@" ;;
+    *) echo "skills home: unknown subcommand '$sub' (known: status, install)" >&2; exit 2 ;;
+  esac
+}
+
+home_status() {
+  home_have_src
+  echo "home instructions: home/CLAUDE.md, home/AGENTS.md"
+  local target dir name state
+  for target in $all_targets; do
+    dir="$(home_dir_for "$target")"
+    [ -n "$dir" ] || continue
+    for name in $home_files; do
+      state="$(home_state "$name" "$dir")"
+      case "$state" in
+        current) echo "  $target  $dir/$name  installed and identical" ;;
+        missing) echo "  $target  $dir/$name  not installed" ;;
+        differs)
+          echo "  $target  $dir/$name  installed and drifted"
+          echo "    $(home_counts "$name" "$dir")"
+          echo "    home install refuses while it differs; fold the target's wording into home/$name, or pass --force"
+          ;;
+      esac
+    done
+  done
+}
+
+home_install() {
+  home_have_src
+  local targets="$all_targets" dry=0 force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --targets) targets="$(printf '%s' "$2" | tr ',' ' ')"; shift 2 ;;
+      --dry-run) dry=1; shift ;;
+      --force) force=1; shift ;;
+      *) echo "skills home install: unknown argument '$1'" >&2; exit 2 ;;
+    esac
+  done
+
+  local target dir name state
+  for target in $targets; do
+    dir="$(home_dir_for "$target")"
+    if [ -z "$dir" ]; then
+      echo "skipped  $target  no home instructions file for this target"
+      continue
+    fi
+    # Refuse before writing anything, so a drifted second file never leaves
+    # the first one half updated.
+    if [ "$force" -eq 0 ]; then
+      for name in $home_files; do
+        if [ "$(home_state "$name" "$dir")" = differs ]; then
+          echo "skills home install: $dir/$name differs from home/$name:" >&2
+          echo "  $(home_counts "$name" "$dir")" >&2
+          echo "  Writing would overwrite it. Fold what you want to keep into home/$name, or pass --force." >&2
+          exit 2
+        fi
+      done
+    fi
+    for name in $home_files; do
+      state="$(home_state "$name" "$dir")"
+      if [ "$state" = current ]; then
+        echo "current  $target  $dir/$name"
+        continue
+      fi
+      if [ "$dry" -eq 1 ]; then
+        echo "would write home instructions -> $dir/$name"
+        continue
+      fi
+      mkdir -p "$dir"
+      cp "$home_dir/$name" "$dir/$name"
+      echo "wrote home instructions -> $dir/$name"
+    done
+  done
+}
+
+hooks_src="$here/hooks/hooks.json"
+
+# Both targets nest the hook table under a top-level "hooks" key, so one code
+# path reads and writes both. Claude's file carries every other user setting
+# alongside it, which is why the write is a merge and never a whole-file write.
+hooks_file_for() {
+  case "$1" in
+    claude) printf '%s\n' "$HOME/.claude/settings.json" ;;
+    codex)  printf '%s\n' "$HOME/.codex/hooks.json" ;;
+    *) echo "skills: unknown target '$1' (known: $all_targets)" >&2; exit 2 ;;
+  esac
+}
+
+need_jq() { command -v jq >/dev/null || { echo "skills hooks: needs jq on PATH" >&2; exit 2; }; }
+
+hooks_canon() {
+  [ -f "$hooks_src" ] || { echo "skills hooks: missing $hooks_src" >&2; exit 2; }
+  jq -ce . "$hooks_src" 2>/dev/null || { echo "skills hooks: $hooks_src is not valid JSON" >&2; exit 2; }
+}
+
+hooks_installed() {
+  local f="$1"
+  [ -f "$f" ] || { echo '{}'; return 0; }
+  jq -ce '.hooks // {}' "$f" 2>/dev/null || { echo "skills hooks: $f is not valid JSON" >&2; exit 2; }
+}
+
+# One row per hook this repo defines: event, command, then per target whether it
+# is held verbatim (current), held under that command with other settings
+# (differs), or absent (missing).
+hooks_rows() {
+  jq -rn --argjson canon "$1" --argjson a "$2" --argjson b "$3" '
+    def state($inst; $event; $h):
+      ($inst[$event] // [] | map(.hooks[]?)) as $there
+      | if ($there | index($h)) != null then "current"
+        elif ($there | map(.command) | index($h.command)) != null then "differs"
+        else "missing" end;
+    $canon | to_entries[] as $e
+    | $e.value[]? | .hooks[]? as $h
+    | [ $e.key, ($h.command // "?"), state($a; $e.key; $h), state($b; $e.key; $h) ]
+    | @tsv'
+}
+
+# Anything a target holds that this repo does not define. Named to match how
+# status treats a skill directory this repo does not own. Ownership is keyed on
+# the command, not on the whole entry, so a hook of ours whose timeout drifted
+# in the target stays ours to repair rather than reading as someone else's.
+hooks_unmanaged() {
+  jq -rn --argjson canon "$1" --argjson inst "$2" '
+    $inst | to_entries[] as $e
+    | ($canon[$e.key] // [] | map(.hooks[]?) | map(.command // .)) as $ours
+    | $e.value[]? | .hooks[]? as $h
+    | select(($ours | index($h.command // $h)) == null)
+    | [ $e.key, ($h.command // ($h.type // "?")) ]
+    | @tsv'
+}
+
+cmd_hooks() {
+  local sub="${1:-status}"
+  [ $# -gt 0 ] && shift || true
+  case "$sub" in
+    status)  hooks_status "$@" ;;
+    install) hooks_install "$@" ;;
+    *) echo "skills hooks: unknown subcommand '$sub' (known: status, install)" >&2; exit 2 ;;
+  esac
+}
+
+hooks_status() {
+  need_jq
+  local canon claude_inst codex_inst
+  canon="$(hooks_canon)"
+  claude_inst="$(hooks_installed "$(hooks_file_for claude)")"
+  codex_inst="$(hooks_installed "$(hooks_file_for codex)")"
+
+  printf '%-14s %-22s %-10s %s\n' EVENT COMMAND CLAUDE CODEX
+  while IFS=$'\t' read -r event command a b; do
+    [ -n "$event" ] || continue
+    printf '%-14s %-22s %-10s %s\n' "$event" "$command" "$a" "$b"
+  done <<< "$(hooks_rows "$canon" "$claude_inst" "$codex_inst")"
+
+  local found=0
+  for target in $all_targets; do
+    local inst; inst="$(hooks_installed "$(hooks_file_for "$target")")"
+    while IFS=$'\t' read -r event command; do
+      [ -n "$event" ] || continue
+      if [ "$found" -eq 0 ]; then
+        echo
+        echo "installed but not in this repo (unmanaged, this repo does not own these):"
+        found=1
+      fi
+      echo "  $target  $event  $command"
+    done <<< "$(hooks_unmanaged "$canon" "$inst")"
+  done
+  if [ "$found" -eq 1 ]; then
+    echo "  hooks install refuses while these are here; add them to hooks/hooks.json or pass --force"
+  fi
+}
+
+hooks_install() {
+  need_jq
+  local targets="$all_targets" dry=0 force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --targets) targets="$(printf '%s' "$2" | tr ',' ' ')"; shift 2 ;;
+      --dry-run) dry=1; shift ;;
+      --force) force=1; shift ;;
+      *) echo "skills hooks install: unknown argument '$1'" >&2; exit 2 ;;
+    esac
+  done
+
+  local canon canon_sorted
+  canon="$(hooks_canon)"
+  canon_sorted="$(jq -cS . <<< "$canon")"
+
+  for target in $targets; do
+    local f inst extra
+    f="$(hooks_file_for "$target")"
+    inst="$(hooks_installed "$f")"
+    extra="$(hooks_unmanaged "$canon" "$inst")"
+
+    if [ -n "$extra" ] && [ "$force" -eq 0 ]; then
+      echo "skills hooks install: $f holds hooks this repo does not define:" >&2
+      printf '%s\n' "$extra" | while IFS=$'\t' read -r event command; do
+        [ -n "$event" ] && echo "  $event  $command" >&2
+      done
+      echo "  Writing would drop them. Add them to hooks/hooks.json, or pass --force to overwrite." >&2
+      exit 2
+    fi
+
+    if [ "$(jq -cS . <<< "$inst")" = "$canon_sorted" ]; then
+      echo "current  $target  $f"
+      continue
+    fi
+    if [ "$dry" -eq 1 ]; then
+      echo "would write hooks -> $f"
+      continue
+    fi
+
+    mkdir -p "$(dirname "$f")"
+    [ -f "$f" ] || echo '{}' > "$f"
+    local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/skills-hooks.XXXXXX")"
+    # Merge into the existing document so every other setting in the file
+    # survives, then replace atomically.
+    jq --argjson h "$canon" '.hooks = $h' "$f" > "$tmp"
+    mv "$tmp" "$f"
+    echo "wrote hooks -> $f"
+  done
+}
+
+cmd="${1:-}"
+[ $# -gt 0 ] && shift || true
+case "$cmd" in
+  status)    cmd_status "$@" ;;
+  new)       cmd_new "$@" ;;
+  install)   cmd_install "$@" ;;
+  uninstall) cmd_uninstall "$@" ;;
+  remove)    cmd_remove "$@" ;;
+  home)      cmd_home "$@" ;;
+  hooks)     cmd_hooks "$@" ;;
+  lint)      "$here/tests/lint.sh" ;;
+  test)      "$here/tests/lint.sh" && "$here/tests/loads.test.sh" ;;
+  ""|-h|--help) usage ;;
+  *) echo "skills: unknown command '$cmd'" >&2; echo >&2; usage >&2; exit 2 ;;
+esac

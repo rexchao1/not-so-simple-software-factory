@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+#
+# factory-answer <work_id> <message>
+# factory-answer --list
+#
+# Answering is what unparks needs-input Work: AnswerWork re-routes and requeues
+# it in the same transaction and resets the last stage to pending, so the final
+# stage re-runs from the recorded checkpoint SHA.
+#
+# Server side rules worth catching locally, because the errors are opaque:
+#   - both the work_id in the path and the generated request_id must be
+#     LOWERCASE UUIDs; validUUID rejects uppercase with invalid_answer_identity.
+#   - message is capped at 8 KiB (MaxAnswerBytes), over which it is a 413.
+#   - request_id is the idempotency key. Reusing one with a different message
+#     is a 409 answer_request_conflict.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+API="$SCRIPTS/factory-api"
+MAX_ANSWER_BYTES=8192
+
+if [ "${1:-}" = "--list" ]; then
+  runs="$("$API" GET /api/v1/runs)" || exit 1
+  found=0
+  for run_id in $(printf '%s' "$runs" | jq -r '.runs[] | select((.needs_input_count // 0) > 0) | .id'); do
+    found=1
+    detail="$("$API" GET "/api/v1/runs/$run_id")" || exit 1
+    printf '%s' "$detail" | jq -r '
+      ((.run.task.submitted_name // .run.task.name) // "(unnamed)") as $task
+      | .sessions[] | select(.state == "needs-input") |
+      "work     " + .id,
+      "task     " + $task,
+      "QUESTION " + (.question // "(none recorded)"),
+      ""'
+  done
+  [ "$found" -eq 0 ] && echo "nothing is waiting on you"
+  exit 0
+fi
+
+if [ "$#" -ne 2 ]; then
+  echo "usage: factory-answer <work_id> <message>" >&2
+  echo "       factory-answer --list" >&2
+  exit 2
+fi
+
+work_id="$1"; message="$2"
+
+if ! grep -qE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' <<< "$work_id"; then
+  echo "error: work id must be a lowercase UUID" >&2
+  echo "hint: validUUID accepts lowercase hex only; an uppercase id is a 400" >&2
+  exit 2
+fi
+
+msg_bytes="$(printf '%s' "$message" | wc -c | tr -d ' ')"
+if [ "$msg_bytes" -gt "$MAX_ANSWER_BYTES" ]; then
+  echo "error: answer is $msg_bytes bytes, limit is $MAX_ANSWER_BYTES (8 KiB)" >&2
+  exit 2
+fi
+if [ -z "$(printf '%s' "$message" | tr -d '[:space:]')" ]; then
+  echo "error: answer must not be blank" >&2
+  exit 2
+fi
+
+request_id="$(uuidgen | tr 'A-Z' 'a-z')"
+payload="$(jq -nc --arg rid "$request_id" --arg msg "$message" \
+  '{request_id: $rid, message: $msg}')"
+
+response="$("$API" POST "/api/v1/work/$work_id/answer" "$payload")" || exit 1
+
+printf '%s' "$response" | jq -r '"answered " + .work_id + " at " + .accepted_at'
+echo "the final stage will re-run from the recorded checkpoint"

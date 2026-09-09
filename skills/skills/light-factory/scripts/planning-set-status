@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+#
+# planning-set-status <project> <n> <status>
+#
+# Moves a checkpoint along the one path the store allows:
+#
+#   planned -> review -> frozen        (review -> fog -> frozen when foggy)
+#   frozen  -> built
+#
+# Everything else, including a move to the status the checkpoint already
+# holds, is refused with planning_transition_not_allowed at 409. That refusal
+# is printed here as its own line rather than buried, because it is the store
+# saying the chain is not where this session thinks it is: usually a lost
+# update, a re-freeze, or a step skipped.
+#
+# The five statuses are checked here first, so a typo costs no round trip and
+# reads as a typo rather than as a refusal.
+#
+# Exit: 0 moved, 1 refused or another API error, 2 usage.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+API="$SCRIPTS/../../dark-factory/scripts/factory-api"
+
+usage() { echo "usage: planning-set-status <project> <n> <planned|review|fog|frozen|built>" >&2; exit 2; }
+[ "$#" -eq 3 ] || usage
+[ -x "$API" ] || { echo "error: the dark-factory factory-api is not at $API" >&2
+  echo "hint: light-factory reaches the server through dark-factory's client. Install both." >&2; exit 2; }
+
+project="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+n="$2"
+status="$(printf '%s' "$3" | tr 'A-Z' 'a-z')"
+[[ "$project" =~ ^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$ ]] || {
+  echo "error: '$1' is not a project slug" >&2; exit 2; }
+[[ "$n" =~ ^[0-9]+$ ]] || { echo "error: checkpoint number must be an integer" >&2; exit 2; }
+n=$((10#$n))
+case "$status" in
+  planned|review|fog|frozen|built) ;;
+  *) echo "error: '$3' is not a status. The five are planned, review, fog, frozen, built" >&2; exit 2 ;;
+esac
+
+err="$(mktemp)"
+trap 'rm -f "$err"' EXIT
+payload="$(jq -nc --arg s "$status" '{status: $s}')"
+response="$("$API" POST "/api/v1/planning/projects/$project/checkpoints/$n/status" "$payload" 2>"$err")"
+rc=$?
+if [ "$rc" -eq 0 ]; then
+  printf '%s' "$response" | jq -r '
+    "status  " + (.project) + " checkpoint " + (.number | tostring) + " is now " + (.status),
+    (if (.frozen_at // "") != "" then "frozen  " + .frozen_at else empty end)'
+  exit 0
+fi
+
+# factory-api writes "error: <code>: <message>". Say the code on its own line:
+# it is the stable thing to branch on, and planning_transition_not_allowed
+# means the checkpoint is not where this session thought it was.
+line="$(head -n1 "$err")"
+code="$(printf '%s' "$line" | sed -n 's/^error: \([a-z0-9_]*\):.*/\1/p')"
+message="$(printf '%s' "$line" | sed -n 's/^error: [a-z0-9_]*: //p')"
+if [ -n "$code" ]; then
+  echo "refused $code" >&2
+  [ -n "$message" ] && echo "server  $message" >&2
+  if [ "$code" = "planning_transition_not_allowed" ]; then
+    echo "hint    read the checkpoint with planning-show before moving it again. There is no way back along the path." >&2
+  fi
+else
+  cat "$err" >&2
+fi
+exit "$rc"

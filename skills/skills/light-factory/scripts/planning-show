@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# planning-show <project> [n]
+#
+# Where the plan stands, read from the server rather than from anything this
+# session remembers.
+#
+# The summary comes from GET /api/v1/roadmap, which is the same read the
+# cockpit's Planning page makes: it is the only place status, critic rounds
+# and cost are joined onto a checkpoint. Cost comes from the critique Work
+# rows, so it is what the critic actually spent, not an estimate.
+#
+# With a number it also reads the checkpoint itself and prints the PRD body
+# and the saved answers, which the roadmap does not carry.
+#
+# Reads only. Nothing here changes a row.
+#
+# Exit: 0 printed, 1 API error, 2 usage or an unknown project.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+API="$SCRIPTS/../../dark-factory/scripts/factory-api"
+
+usage() { echo "usage: planning-show <project> [n]" >&2; exit 2; }
+[ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage
+[ -x "$API" ] || { echo "error: the dark-factory factory-api is not at $API" >&2
+  echo "hint: light-factory reaches the server through dark-factory's client. Install both." >&2; exit 2; }
+
+project="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+n="${2:-}"
+[[ "$project" =~ ^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$ ]] || {
+  echo "error: '$1' is not a project slug" >&2; exit 2; }
+if [ -n "$n" ]; then
+  [[ "$n" =~ ^[0-9]+$ ]] || { echo "error: checkpoint number must be an integer" >&2; exit 2; }
+  n=$((10#$n))
+fi
+
+roadmap="$("$API" GET /api/v1/roadmap)" || exit 1
+
+known="$(printf '%s' "$roadmap" | jq -r --arg p "$project" '[.projects[]? | select(.project == $p)] | length')"
+if [ "$known" = "0" ]; then
+  echo "no project '$project' on the server" >&2
+  echo "known projects:" >&2
+  printf '%s' "$roadmap" | jq -r '.projects[]? | "  " + .project + "  " + (.title // "")' >&2
+  exit 2
+fi
+
+printf '%s' "$roadmap" | jq -r --arg p "$project" --arg only "${n:-}" '
+  (.projects[] | select(.project == $p)) as $proj
+  | "project  " + $proj.project + "  " + ($proj.title // ""),
+    (if ($proj.statement // "") != "" then "         " + $proj.statement else empty end),
+    "cost     $" + (($proj.cost_usd // 0) * 100 | round / 100 | tostring)
+      + "   built " + (($proj.built_count // 0) | tostring)
+      + "/" + (($proj.checkpoints // []) | length | tostring),
+    "",
+    ($proj.checkpoints[]?
+     | select($only == "" or (.number | tostring) == $only)
+     | "  " + (.number | tostring) + "  " + (.status) + "  " + (.title // ""),
+       (if (.summary // "") != "" then "     summary  " + .summary else empty end),
+       "     critic   " + ((.pass_rounds // 0) | tostring) + " round(s), $"
+         + (((.cost_usd // 0) * 100 | round / 100) | tostring),
+       (if ((.pebbles // []) | length) > 0 then
+          "     pebbles  " + ((.pebbles | length) | tostring)
+            + " in " + (((.stones // []) | length) | tostring) + " stone(s)"
+        else empty end),
+       ((.stones // [])[] | "       " + .id + "  " + (.title // "") + "  " + (.state // "")),
+       ((.pebbles // [])[] | "         " + .slug + "  " + (.state // "planned")
+          + (if (.pull_request_url // "") != "" then "  " + .pull_request_url else "" end)),
+       (if .live then "     live     " + .live.mode + " round "
+          + ((.live.round // 0) | tostring) + " is running now" else empty end),
+       ""),
+    (if $only == "" then
+       ((.waiting // [])[] | select(.project == $p)
+        | "waiting  " + (.number | tostring) + "  " + .reason + "  ->  " + .action)
+     else empty end)'
+
+[ -n "$n" ] || exit 0
+
+checkpoint="$("$API" GET "/api/v1/planning/projects/$project/checkpoints/$n")" || exit 1
+printf '%s' "$checkpoint" | jq -r '
+  "--- body ---",
+  (if (.body // "") == "" then "(no PRD saved yet)" else .body end),
+  "",
+  "--- answers ---",
+  (if (.answers // "") == "" then "(none saved)" else .answers end),
+  (if (.frozen_at // "") != "" then "", "frozen at " + .frozen_at else empty end)'

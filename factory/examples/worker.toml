@@ -1,0 +1,26 @@
+# Copy this file to ~/.factory/worker.toml.
+server = "http://127.0.0.1:7337"
+name = "local"
+# The legacy runtime remains the default for clients that do not select one.
+runtime = "codex"
+# One Worker may advertise several installed coding agents. Missing or
+# unauthenticated runtimes remain visible without stopping ready runtimes.
+runtimes = ["pi", "codex", "claude-code"]
+# Optional. Defaults to 10 and accepts values from 1 through 100.
+# max_concurrent = 10
+# Optional scheduling and inventory metadata shown on the Worker profile.
+# [labels]
+# environment = "development"
+# host = "laptop"
+# With no data_directory, this worker stores durable state in
+# ~/.factory/workers/worker, derived from this file's name (worker.toml).
+# Set data_directory only to override that location.
+# No repository or GitHub opt-in is required. Factory advertises GitHub access
+# while `gh auth status --hostname github.com` succeeds and clones centrally
+# managed repositories into this worker's data directory on demand.
+
+# Legacy manual delegation may still point a worker at an existing checkout:
+# [repositories.factory]
+# path = "/absolute/path/to/factory"
+# Optional. When omitted, Factory uses the origin default branch.
+# base_branch = "release/2026.07"

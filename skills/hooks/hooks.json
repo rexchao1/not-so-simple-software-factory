@@ -1,0 +1,14 @@
+{
+  "SessionStart": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "npx -y chrome-devtools-axi",
+          "timeout": 10
+        }
+      ]
+    }
+  ]
+}

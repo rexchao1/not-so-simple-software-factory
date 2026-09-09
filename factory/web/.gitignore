@@ -1,0 +1,9 @@
+node_modules/
+playwright-report/
+test-results/
+# Written by the FACTORY_CAPTURE screenshot pass in e2e/screenshots.spec.ts.
+screenshots/
+.tmp/
+
+# Playwright browsers, installed into the project rather than the user cache.
+.playwright-browsers/

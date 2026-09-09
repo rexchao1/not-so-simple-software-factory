@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+#
+# preflight <project> <n> [--vault NAME]
+#
+# Every host the PRD says the checkpoint needs must have a service rule in the
+# vault before a single task is submitted. Reads the PRD from the server,
+# takes its ## Credentials section, lists the vault's services, and reports one
+# line per host: the rule that covers it, or MISSING. Any MISSING fails, and
+# nothing is submitted until the rule exists and this passes.
+#
+# The check is against names only. The listing the vault CLI prints carries
+# hosts and the names of token keys, never values, and this script prints only
+# hosts and rule names from it. No credential value reaches an agent here or
+# anywhere else in the chain; the broker adds it at request time.
+#
+# The ## Credentials section is one line per host, as the PRD shape says:
+#
+#   ## Credentials
+#   api.example.com: the payer's REST API. Never a value.
+#   none
+#
+# The host is what stands before the first colon on a line. A section that
+# says none, or is empty, needs no vault at all.
+#
+# The vault name comes from --vault, LIGHT_FACTORY_VAULT, or the first line of
+# ~/.factory/light-factory/vault.name, in that order. It lives under
+# ~/.factory rather than in this skill because an install replaces the skill
+# directory wholesale, and because the name is private and this repo is public.
+#
+# Exit: 0 every host covered or none needed, 1 a host has no rule or the vault
+# could not be listed, 2 usage or no PRD to read.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+API="$SCRIPTS/../../dark-factory/scripts/factory-api"
+AGENT_VAULT="${LIGHT_FACTORY_AGENT_VAULT:-agent-vault}"
+VAULT_FILE="${LIGHT_FACTORY_VAULT_FILE:-$HOME/.factory/light-factory/vault.name}"
+
+usage() { echo "usage: preflight <project> <n> [--vault NAME]" >&2; exit 2; }
+[ "$#" -ge 2 ] || usage
+[ -x "$API" ] || { echo "error: the dark-factory factory-api is not at $API" >&2
+  echo "hint: light-factory reaches the server through dark-factory's client. Install both." >&2; exit 2; }
+
+given="$1"
+project="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+n="$2"; shift 2
+vault="${LIGHT_FACTORY_VAULT:-}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --vault) vault="${2:-}"; shift 2 ;;
+    *) echo "error: unknown argument: $1" >&2; usage ;;
+  esac
+done
+[[ "$project" =~ ^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$ ]] || {
+  echo "error: '$given' is not a project slug" >&2; exit 2; }
+[[ "$n" =~ ^[0-9]+$ ]] || { echo "error: checkpoint number must be an integer" >&2; exit 2; }
+n=$((10#$n))
+
+checkpoint="$("$API" GET "/api/v1/planning/projects/$project/checkpoints/$n")" || exit 1
+body="$(printf '%s' "$checkpoint" | jq -r '.body // ""')"
+[ -n "$(printf '%s' "$body" | tr -d '[:space:]')" ] || {
+  echo "error: checkpoint $n of $project has no PRD saved, so there is nothing to check" >&2; exit 2; }
+
+section="$(printf '%s\n' "$body" | awk '
+  /^##[[:space:]]/ { inside = (tolower($0) ~ /^##[[:space:]]*credentials[[:space:]]*$/); next }
+  inside { print }')"
+
+# A line whose first word is none says there are no credentials, however much
+# prose follows it. The old rule matched only a line that was exactly "none",
+# so "none. The app makes no network request." survived as a hostname and was
+# looked up in the vault. Freezing is one way, so that slip was permanent.
+hosts="$(printf '%s\n' "$section" \
+  | sed -e 's/^[[:space:]]*[-*][[:space:]]*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+  | grep -v '^$' \
+  | awk '{ first = $1; gsub(/[.,;:!]+$/, "", first); if (tolower(first) == "none") next; print }' \
+  | sed -e 's/:.*//' -e 's/[[:space:]]*$//' || true)"
+
+if [ -z "$hosts" ]; then
+  echo "preflight ok: checkpoint $n needs no credentials"
+  exit 0
+fi
+
+# Anything with a space in it is a sentence that got into the section, not a
+# host. Say so before naming a vault, rather than asking the vault for a rule
+# named after prose, or failing for want of a vault the checkpoint may not need.
+while IFS= read -r host; do
+  case "$host" in
+    *[[:space:]]*)
+      printf 'MALFORMED  %s\n' "$host" >&2
+      echo "The Credentials section is the bare word none, or one 'host: purpose' line per host. That line is neither." >&2
+      exit 2 ;;
+  esac
+done <<< "$hosts"
+
+[ -n "$vault" ] || { [ -f "$VAULT_FILE" ] && vault="$(head -n1 "$VAULT_FILE")"; }
+[ -n "$vault" ] || {
+  echo "error: no vault named. Pass --vault, set LIGHT_FACTORY_VAULT, or write the name to $VAULT_FILE" >&2
+  exit 2; }
+command -v "$AGENT_VAULT" >/dev/null 2>&1 || {
+  echo "error: $AGENT_VAULT is not on PATH; the vault CLI does the listing" >&2; exit 2; }
+
+# stderr is kept, because "not logged in" and "no such vault" need different
+# answers from the reader and both used to print the same sentence.
+vault_err="$(mktemp)"
+trap 'rm -f "$vault_err"' EXIT
+listing="$("$AGENT_VAULT" vault service list --vault "$vault" 2>"$vault_err")" || {
+  reason="$(head -n1 "$vault_err")"
+  case "$reason" in
+    *"not logged in"*)
+      echo "error: the vault CLI is not logged in on this Mac, so it cannot list anything." >&2
+      echo "hint:  the login is interactive, so it is the user's to run. Ask them to type" >&2
+      echo "       ! agent-vault auth login" >&2
+      echo "       in this session, then run preflight again." >&2 ;;
+    *) echo "error: could not list the services of vault '$vault': $reason" >&2 ;;
+  esac
+  exit 1; }
+
+missing=0
+while IFS= read -r host; do
+  [ -n "$host" ] || continue
+  rule="$(awk -v h="$host" '
+    /^[[:space:]]*-?[[:space:]]*name:/ { name = $NF }
+    /^[[:space:]]*host:/ && $NF == h { print name; exit }' <<< "$listing")"
+  if [ -n "$rule" ]; then
+    printf 'ok       %s  rule %s\n' "$host" "$rule"
+  else
+    printf 'MISSING  %s  no service rule in vault %s\n' "$host" "$vault"
+    missing=$((missing + 1))
+  fi
+done <<< "$hosts"
+
+if [ "$missing" -eq 0 ]; then
+  echo "preflight ok: every host has a rule in vault $vault"
+  exit 0
+fi
+echo "preflight failed: $missing host(s) without a rule. Add the rule in the vault, then run this again. Nothing is submitted until it passes." >&2
+exit 1

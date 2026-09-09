@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="820" viewBox="0 0 1400 820" role="img" aria-labelledby="title desc">
+  <title id="title">From process variation to a repeatable software factory</title>
+  <desc id="desc">The same engineering task produces uneven results through one-off agent sessions, while a shared factory workflow produces consistent evidence and a reviewable pull request.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#172033" flood-opacity=".08"/></filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8090AD"/></marker>
+    <style>
+      .t{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;fill:#172033}.h{font-size:38px;font-weight:750}.sub{font-size:19px;fill:#657089}.label{font-size:17px;font-weight:700}.body{font-size:16px;fill:#526078}.small{font-size:14px;fill:#657089}.card{fill:#fff;stroke:#DCE2EE;stroke-width:2}.line{fill:none;stroke:#8090AD;stroke-width:3;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1400" height="820" rx="28" fill="#F7F8FC"/>
+  <text class="t h" x="64" y="72">Repeatability is the product</text>
+  <text class="t sub" x="64" y="108">The model is not the workflow. The system around the model determines the quality of the result.</text>
+
+  <rect x="52" y="150" width="624" height="610" rx="24" fill="#FFF8F5" stroke="#F1D6CD" stroke-width="2"/>
+  <text class="t label" x="84" y="194" fill="#C14E3F">ONE-OFF AGENT SESSIONS</text>
+  <text class="t body" x="84" y="224">Every developer assembles a different process.</text>
+  <rect class="card" filter="url(#shadow)" x="82" y="267" width="168" height="88" rx="16"/>
+  <circle cx="112" cy="311" r="15" fill="#F0645A"/><text class="t label" x="140" y="306">Same issue</text><text class="t small" x="140" y="329">Fix checkout bug</text>
+  <path class="line" d="M250 311 C310 311 303 250 355 250"/><path class="line" d="M250 311 H355"/><path class="line" d="M250 311 C310 311 303 372 355 372"/>
+  <g>
+    <rect class="card" x="355" y="209" width="265" height="82" rx="15"/><text class="t label" x="379" y="241">Prompt A + no checks</text><text class="t small" x="379" y="267">Fast, incomplete result</text>
+    <rect class="card" x="355" y="270" width="265" height="82" rx="15"/><text class="t label" x="379" y="302">Prompt B + local skill</text><text class="t small" x="379" y="328">Good code, weak evidence</text>
+    <rect class="card" x="355" y="331" width="265" height="82" rx="15"/><text class="t label" x="379" y="363">Prompt C + manual steps</text><text class="t small" x="379" y="389">Different scope and style</text>
+  </g>
+  <path d="M82 461 H620" stroke="#E7C7BD" stroke-width="2" stroke-dasharray="7 8"/>
+  <text class="t label" x="84" y="506">What varies?</text>
+  <g class="t body"><text x="84" y="542">• context and task interpretation</text><text x="84" y="576">• tools, skills and environment</text><text x="84" y="610">• testing, review and evidence</text><text x="84" y="644">• what happens when CI fails</text></g>
+  <rect x="82" y="680" width="538" height="50" rx="12" fill="#FCE4DE"/><text class="t label" x="351" y="712" text-anchor="middle" fill="#A74034">Quality depends on who ran the session</text>
+
+  <rect x="724" y="150" width="624" height="610" rx="24" fill="#F1F7FF" stroke="#C9D9FA" stroke-width="2"/>
+  <text class="t label" x="756" y="194" fill="#2E5CC2">SHARED FACTORY WORKFLOW</text>
+  <text class="t body" x="756" y="224">Every task passes through the same controlled system.</text>
+  <rect class="card" filter="url(#shadow)" x="756" y="267" width="168" height="88" rx="16"/>
+  <circle cx="786" cy="311" r="15" fill="#356DFF"/><text class="t label" x="814" y="306">Same issue</text><text class="t small" x="814" y="329">Fix checkout bug</text>
+  <path class="line" d="M924 311 H972"/>
+  <rect class="card" filter="url(#shadow)" x="972" y="242" width="326" height="138" rx="18"/>
+  <text class="t label" x="998" y="276">Versioned workflow</text>
+  <g class="t small"><text x="998" y="307">triage → implement → test</text><text x="998" y="332">review → verify → handoff</text><text x="998" y="357">fixed tools, policy and evidence</text></g>
+  <path class="line" d="M1135 380 V430"/>
+  <rect class="card" x="886" y="430" width="498" height="122" rx="18"/>
+  <g class="t body"><text x="914" y="466">✓ acceptance criteria checked</text><text x="914" y="496">✓ tests, build and CI evidence attached</text><text x="914" y="526">✓ risks and decisions recorded for review</text></g>
+  <path class="line" d="M1135 552 V596"/>
+  <rect x="886" y="596" width="498" height="80" rx="16" fill="#DDEAFE" stroke="#A9C4F8" stroke-width="2"/>
+  <text class="t label" x="1135" y="628" text-anchor="middle" fill="#244EAD">Reviewable pull request</text><text class="t small" x="1135" y="653" text-anchor="middle">Same standard, regardless of who triggered it</text>
+  <rect x="756" y="680" width="538" height="50" rx="12" fill="#DBF3EB"/><text class="t label" x="1025" y="712" text-anchor="middle" fill="#087A5D">Quality comes from the system</text>
+</svg>

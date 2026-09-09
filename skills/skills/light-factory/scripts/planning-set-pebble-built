@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+#
+# planning-set-pebble-built <project> <n> <slug> <ref>
+#
+# Records that one pebble was built outside the factory, and what carries it.
+#
+# A pebble's state is otherwise read only from the factory Work row that built
+# it, so a task done by hand and merged by hand reads `planned` on the Planning
+# page forever and the stone above it never finishes. This is how such a pebble
+# says what happened.
+#
+# <ref> is the commit SHA or the pull request URL that carries the work. The
+# server stores it as text and only ever displays it, so either is fine; give
+# the pull request URL when there is one, because it is clickable.
+#
+# <slug> is the pebble's slug, the NN- prefix dropped: the file
+# `02-build-the-word-database.md` was saved as slug
+# `02-build-the-word-database`. `planning-show <project> <n>` lists them.
+#
+# A pebble that also has a real factory Work row keeps that Work's state; the
+# roadmap treats a run as stronger evidence than a hand entry. Marking one of
+# those built is therefore a no-op on the page, not an error.
+#
+# Sending a second time with a different ref replaces the first, so a mistake
+# is correctable.
+#
+# Exit: 0 recorded, 1 refused or another API error, 2 usage.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+API="$SCRIPTS/../../dark-factory/scripts/factory-api"
+
+usage() { echo "usage: planning-set-pebble-built <project> <n> <slug> <ref>" >&2; exit 2; }
+[ "$#" -eq 4 ] || usage
+[ -x "$API" ] || { echo "error: the dark-factory factory-api is not at $API" >&2
+  echo "hint: light-factory reaches the server through dark-factory's client. Install both." >&2; exit 2; }
+
+project="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+n="$2"
+slug="$3"
+ref="$4"
+[[ "$project" =~ ^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$ ]] || {
+  echo "error: '$1' is not a project slug" >&2; exit 2; }
+[[ "$n" =~ ^[0-9]+$ ]] || { echo "error: checkpoint number must be an integer" >&2; exit 2; }
+n=$((10#$n))
+[ -n "$(printf '%s' "$slug" | tr -d '[:space:]')" ] || { echo "error: the pebble slug is empty" >&2; exit 2; }
+# Caught here rather than as a 400, because a blank ref is almost always an
+# unset shell variable and reads as one when it is named locally.
+[ -n "$(printf '%s' "$ref" | tr -d '[:space:]')" ] || {
+  echo "error: the ref is empty. Give the commit SHA or the pull request URL that carries this pebble." >&2
+  exit 2; }
+
+err="$(mktemp)"
+trap 'rm -f "$err"' EXIT
+payload="$(jq -nc --arg r "$ref" '{ref: $r}')"
+response="$("$API" PUT \
+  "/api/v1/planning/projects/$project/checkpoints/$n/pebbles/$slug/built" "$payload" 2>"$err")"
+rc=$?
+if [ "$rc" -eq 0 ]; then
+  printf '%s' "$response" | jq -r '
+    "built   " + (.slug // "?") + "  " + (.title // ""),
+    "ref     " + (.built_ref // "?")'
+  exit 0
+fi
+
+line="$(head -n1 "$err")"
+code="$(printf '%s' "$line" | sed -n 's/^error: \([a-z0-9_]*\):.*/\1/p')"
+message="$(printf '%s' "$line" | sed -n 's/^error: [a-z0-9_]*: //p')"
+if [ -n "$code" ]; then
+  echo "refused $code" >&2
+  [ -n "$message" ] && echo "server  $message" >&2
+  if [ "$code" = "not_found" ]; then
+    echo "hint    run planning-show $project $n and copy a slug from the pebbles list." >&2
+  fi
+else
+  cat "$err" >&2
+fi
+exit "$rc"

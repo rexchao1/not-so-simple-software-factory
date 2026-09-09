@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Reconcile the pipeline definitions in this skill's config/pipelines with the
+# factory. One file per pipeline, matched by name.
+set -euo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SKILL="$(cd "$SCRIPTS/.." && pwd -P)"
+API="$SCRIPTS/factory-api"
+DIRECTORY="$SKILL/config/pipelines"
+
+[ -d "$DIRECTORY" ] || { echo "error: no pipeline directory at $DIRECTORY" >&2; exit 2; }
+
+for file in "$DIRECTORY"/*.json; do
+  [ -e "$file" ] || continue
+  name="$(jq -er '.name' "$file")"
+  stages="$(jq -ec '.stages' "$file")"
+  page="$("$API" GET /api/v1/pipelines)"
+  existing="$(printf '%s' "$page" | jq -c --arg name "$name" '.pipelines[]? | select(.name == $name)' | head -n1)"
+  if [ -z "$existing" ]; then
+    payload="$(jq -nc --arg name "$name" --argjson stages "$stages" '{name:$name, stages:$stages}')"
+    "$API" POST /api/v1/pipelines "$payload" >/dev/null
+    echo "created $name"
+    continue
+  fi
+  id="$(printf '%s' "$existing" | jq -r '.id')"
+  detail="$("$API" GET "/api/v1/pipelines/$id")"
+  generation="$(printf '%s' "$detail" | jq -r '.generation')"
+  payload="$(jq -nc --arg name "$name" --argjson stages "$stages" --argjson generation "$generation" \
+    '{name:$name, stages:$stages, expected_generation:$generation}')"
+  "$API" PUT "/api/v1/pipelines/$id" "$payload" >/dev/null
+  echo "updated $name"
+done

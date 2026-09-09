@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+#
+# factory-pipeline-set <definition.json> [--create]
+#
+# Makes a factory pipeline match a definition kept in this skill under
+# config/pipelines/. A relative path is resolved against the current directory
+# first and then against this skill, so config/pipelines/x.json works from
+# anywhere. The definition is a protocol.SavePipelineRequest without
+# expected_generation: {"name": ..., "stages": [{name, kind, prompt|command}]}.
+# The pipeline is found by name. PUT /api/v1/pipelines/{id} replaces its
+# stages, with expected_generation set to the generation just read, so a
+# concurrent cockpit edit is refused rather than overwritten. With --create,
+# a pipeline that does not exist yet is created with POST /api/v1/pipelines.
+#
+# Stage prompts may use {{ task.prompt }}, {{ task.name }}, {{ task.id }},
+# {{ run.id }}, {{ repository }}, and {{ branch }} (the Factory publish
+# branch). A stage that does not mention {{ task.prompt }} receives the task
+# appended anyway (controlplane/pipelines.go renderPipelinePrompt, INV-9).
+#
+# Before changing a pipeline, keep a copy: factory-pipelines --json.
+#
+# Exit: 0 ok, 1 API error or no such pipeline, 2 usage.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SKILL="$(cd "$SCRIPTS/.." && pwd -P)"
+API="$SCRIPTS/factory-api"
+
+definition="${1:-}"; create=0
+[ "${2:-}" = "--create" ] && create=1
+# A definition named relative to the skill, the way the skill body writes it,
+# resolves whatever the working directory is.
+if [ -n "$definition" ] && [ ! -f "$definition" ] && [ -f "$SKILL/$definition" ]; then
+  definition="$SKILL/$definition"
+fi
+if [ -z "$definition" ] || [ ! -f "$definition" ]; then
+  echo "usage: factory-pipeline-set <definition.json> [--create]" >&2
+  echo "       a relative path is tried in the current directory, then in $SKILL" >&2
+  exit 2
+fi
+name="$(jq -r '.name // empty' "$definition")"
+[ -n "$name" ] || { echo "error: the definition has no name" >&2; exit 2; }
+jq -e '.stages | type == "array" and length > 0' "$definition" > /dev/null || { echo "error: the definition has no stages" >&2; exit 2; }
+
+page="$("$API" GET /api/v1/pipelines)" || exit 1
+id="$(printf '%s' "$page" | jq -r --arg n "$name" '.pipelines[] | select(.name == $n) | .id' | head -n1)"
+
+if [ -z "$id" ]; then
+  if [ "$create" -eq 1 ]; then
+    body="$(jq -c '{name: .name, stages: .stages}' "$definition")"
+    created="$("$API" POST /api/v1/pipelines "$body")" || exit 1
+    printf '%s' "$created" | jq -r '(.pipeline // .) | "created: \(.name) (\(.id)) generation \(.generation)"'
+    exit 0
+  fi
+  echo "error: no pipeline named '$name'. Pass --create to create it" >&2
+  exit 1
+fi
+
+current="$("$API" GET "/api/v1/pipelines/$id")" || exit 1
+generation="$(printf '%s' "$current" | jq -r '(.pipeline // .) | .generation')"
+body="$(jq -c --argjson g "$generation" '{name: .name, stages: .stages, expected_generation: $g}' "$definition")"
+updated="$("$API" PUT "/api/v1/pipelines/$id" "$body")" || exit 1
+printf '%s' "$updated" | jq -r --argjson g "$generation" '(.pipeline // .) | "updated: \(.name) (\(.id)) generation \($g) -> \(.generation)", (.stages[] | "  stage \(.position) \(.name) kind=\(.kind) \(.prompt | length) bytes")'

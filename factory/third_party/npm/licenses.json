@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "packages": {
+    "node_modules/@tanstack/query-core": "tanstack.LICENSE",
+    "node_modules/@tanstack/react-query": "tanstack.LICENSE",
+    "node_modules/lucide-react": "lucide.LICENSE",
+    "node_modules/react": "react.LICENSE",
+    "node_modules/react-dom": "react.LICENSE",
+    "node_modules/scheduler": "react.LICENSE"
+  }
+}

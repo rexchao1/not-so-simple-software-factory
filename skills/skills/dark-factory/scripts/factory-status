@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+#
+# factory-status [run_id]
+#
+# Reads factory state. Holds none of it.
+#
+# Notes that shape this script, all measured against the live host:
+#   - GET /api/v1/runs?state=X accepts ONLY state=draft. Every other value is
+#     a 400 invalid_state. So we fetch the list unfiltered and filter here.
+#   - There is no GET /api/v1/work/{work_id}; it 404s. A Work is readable only
+#     through its run.
+#   - GET /api/v1/runs/{run_id} returns {"run":{...},"sessions":[...]}. It is
+#     NOT a flat run object with a sessions key.
+#   - publish_branch lives on session.target, not on the session itself.
+#   - workers carry "health" (a string) and "online" (a bool). There is no
+#     "state" and no "healthy" field on a worker.
+#   - tasks.name carries a " (xxxxxxxx)" request-key suffix for deduplication.
+#     tasks.submitted_name is the title a human wrote. Always show the latter.
+#   - Run ids are printed in full, never truncated. The detail view takes a run
+#     id, the API rejects a prefix with not_found, and a tool that prints an
+#     identifier you cannot hand back to it is worse than one that prints none.
+#     Found the hard way, by hitting exactly that wall.
+#   - A refused automatic merge is readable: recordMergeRefusal appends the
+#     reason to sessions.terminal_message. A SUCCESSFUL automatic merge is not:
+#     it writes only a work_updates row, and no route exposes work_updates.
+#     Never imply a merge happened just because no refusal was recorded.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+API="$SCRIPTS/factory-api"
+
+if [ "$#" -gt 1 ]; then
+  echo "usage: factory-status [run_id]" >&2
+  exit 2
+fi
+
+if [ "$#" -eq 1 ]; then
+  run="$("$API" GET "/api/v1/runs/$1")" || exit 1
+  # The run detail's sessions carry no verification counts; the Work list does.
+  # Fetch it for this run so the detail can say which checks a code stage
+  # actually ran, instead of leaving a reader to trust a stage that says
+  # succeeded. planning=all because a critique pass is Work too.
+  checks="$("$API" GET "/api/v1/work?run_id=$1&limit=50&planning=all" 2>/dev/null)" || checks=""
+  [ -n "$checks" ] || checks='{"work":[]}'
+  printf '%s' "$run" | jq -r --argjson checks "$checks" '
+    (.run // {}) as $r
+    | "run     " + ($r.id // "(unknown)"),
+      "task    " + ($r.task.submitted_name // $r.task.name // "(unnamed)"),
+      "state   " + ($r.state // "(unknown)"),
+      "source  " + ($r.source // "unknown"),
+      "",
+      (.sessions[]? | . as $session |
+        "  work    " + .id,
+        "  state   " + (.state // "(unknown)"),
+        "  branch  " + (.target.publish_branch // "(none yet)"),
+        "  deliver " + (.delivery // "(unset)"),
+        (if (.pull_request_url // "") != "" then "  pr      " + .pull_request_url else empty end),
+        (if ((.stages // []) | length) > 0 then
+           "  stages  " + ((.stages | map((.position | tostring) + " " + .name + " " + (.state // "?"))) | join("  |  "))
+         else empty end),
+        (if (.question // "") != "" then "  QUESTION " + .question else empty end),
+        (($checks.work // []) | map(select(.id == $session.id)) | .[0].verification) as $v
+         | (if $v == null or ($v.recorded_checks // 0) == 0 then
+              "  checks  none recorded, so run the task\u0027s named checks yourself"
+            else
+              "  checks  " + (($v.passed // 0) | tostring) + " passed"
+              + (if ($v.failed // 0) > 0 then ", " + (($v.failed) | tostring) + " FAILED" else "" end)
+              + (if ($v.unknown // 0) > 0 then ", " + (($v.unknown) | tostring) + " unknown" else "" end)
+              + " of " + (($v.recorded_checks) | tostring)
+              + (if ($v.failed // 0) > 0 or ($v.unknown // 0) > 0 then "" else " (code stages only; a check nobody wrote is not counted)" end)
+            end),
+        (if (.result // "") != "" then "  result  " + .result else empty end),
+        (if (.latest_progress // "") != "" then "  progress " + .latest_progress else empty end),
+        (if (.terminal_message // "") != "" then "  note    " + ((.terminal_message | split("\n")) | join(" ")) else empty end),
+        (if (.delivery // "") == "pr+automerge" and (.state // "") == "ready" then
+           (if any((.updates // [])[]?; .status == "merged" and .actor == "system") then
+              "  merge   completed by Factory"
+            elif ((.terminal_message // "") | test("Automatic merge was refused")) then
+              "  merge   refused: " + (((.terminal_message | split("\n")) | map(select(test("Automatic merge was refused"))) | .[0]) | sub("^Automatic merge was refused: "; ""))
+            else
+              "  merge   pending or not attempted"
+            end)
+         else empty end),
+        "")
+  '
+  exit 0
+fi
+
+runs="$("$API" GET /api/v1/runs)" || exit 1
+
+printf '%s' "$runs" | jq -r '
+  if ((.runs // []) | length) == 0 then
+    "no runs"
+  else
+    (.runs[] |
+      .id + "  " +
+      (((.state // "?") + "          ")[0:10]) + "  " +
+      (.source // "?") + "  " +
+      (.task.submitted_name // .task.name // "(unnamed)") +
+      (if (.needs_input_count // 0) > 0 then "   <- NEEDS INPUT" else "" end))
+  end
+'
+
+echo
+workers="$("$API" GET /api/v1/workers)" || exit 1
+printf '%s' "$workers" | jq -r '
+  if ((.workers // []) | length) == 0 then
+    "no workers registered"
+  else
+    (.workers[] | "worker " + (.name // .id[0:8]) + "  " + (.health // "?") +
+      (if (.online // false) then "  online" else "  OFFLINE" end) +
+      "  " + ((.active_count // 0) | tostring) + "/" + ((.capacity // 0) | tostring) + " busy")
+  end
+'

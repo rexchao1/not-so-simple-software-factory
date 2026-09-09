@@ -1,0 +1,28 @@
+{
+  "name": "Payer: implement, verify, review, deliver",
+  "stages": [
+    {
+      "name": "Implement",
+      "kind": "agent",
+      "model": "sonnet",
+      "effort": "medium",
+      "prompt": "Implement and commit the task on the current working branch. Run focused tests needed while developing. This repository's AGENTS.md asks for scripts/run_tests.sh before every commit; in this pipeline the next model-free stage runs that exact script against your commit, so do not run it yourself: commit once the focused tests are green and leave the canonical suite to that stage. Commit before you finish. Work left uncommitted in the tree is discarded, and the run ends as no-change. Do not push, open a pull request, or call factory update.\n\n{{ task.prompt }}"
+    },
+    {
+      "name": "Verify",
+      "kind": "code",
+      "command": "scripts/run_tests.sh"
+    },
+    {
+      "name": "Review",
+      "kind": "agent",
+      "model": "opus",
+      "effort": "high",
+      "prompt": "Review work you did not write. Inspect the commits and diff against the target base branch. Factory supplies the preceding mechanical check as prior-stage evidence. Do not rerun scripts/run_tests.sh when that evidence says it passed; run only a targeted check needed to investigate a concrete finding. Do not edit, push, open a pull request, or call factory update. Put exactly one verdict on the first line: FACTORY-VERDICT: approve, FACTORY-VERDICT: request-changes, or FACTORY-VERDICT: blocked. Then concisely record the verification evidence and findings for Factory delivery.\n\n{{ task.prompt }}"
+    },
+    {
+      "name": "Deliver",
+      "kind": "delivery"
+    }
+  ]
+}

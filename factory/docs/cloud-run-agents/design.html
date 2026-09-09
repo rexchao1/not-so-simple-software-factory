@@ -1,0 +1,2503 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <meta name="document-kind" content="design">
+  <meta name="source-path" content="docs/cloud-run-agents/design.md">
+  <meta name="source-sha256" content="cf7d4798a0881a913f66dedfe43b6fdf2dcf29181e288ec74d1a7c7e1887b732">
+  <meta name="generator" content="blueprint/html-doc@1">
+  <title>Elastic Cloud Run agent backend</title>
+  <style>:root {
+  color-scheme: light;
+  --paper: #e8edf0;
+  --sheet: #fbfcfd;
+  --ink: #202a31;
+  --muted: #5c6d78;
+  --line: #c7d2d9;
+  --accent: #536f82;
+  --accent-soft: #dce6ec;
+  --code: #202a32;
+  --focus: #176b93;
+  --shadow: 0 22px 60px rgb(39 56 67 / 10%);
+  --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --serif: Iowan Old Style, Baskerville, "Times New Roman", serif;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.68;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; background: var(--paper); }
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 8% 3%, rgb(83 111 130 / 12%), transparent 24rem),
+    radial-gradient(circle at 92% 12%, rgb(63 101 117 / 8%), transparent 26rem),
+    var(--paper);
+  text-rendering: optimizeLegibility;
+}
+
+a { color: #3f6575; text-underline-offset: .16em; }
+a:hover { color: var(--accent); }
+a:focus-visible, summary:focus-visible, [tabindex="-1"]:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 4px;
+  border-radius: 3px;
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 20;
+  top: .75rem;
+  left: .75rem;
+  transform: translateY(-180%);
+  padding: .65rem .9rem;
+  color: white;
+  background: var(--ink);
+  border-radius: .35rem;
+}
+.skip-link:focus { transform: translateY(0); }
+
+.document-header {
+  border-bottom: 1px solid rgb(63 78 88 / 18%);
+  background: rgb(251 252 253 / 76%);
+}
+.document-header__inner {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 1.1rem clamp(1rem, 4vw, 3rem);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+}
+.document-brand {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  font-weight: 760;
+  letter-spacing: -.015em;
+  white-space: nowrap;
+}
+.document-brand__mark {
+  width: 2.1rem;
+  height: 2.1rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--sheet);
+  background: var(--accent);
+  font-family: var(--serif);
+  font-size: 1.15rem;
+}
+.metadata {
+  display: flex;
+  justify-content: flex-end;
+  gap: .65rem;
+  flex-wrap: wrap;
+  margin: 0;
+  color: var(--muted);
+  font-size: .78rem;
+}
+.metadata__item {
+  display: flex;
+  gap: .3rem;
+  padding: .28rem .55rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--sheet);
+}
+.metadata dt { color: var(--ink); font-weight: 760; }
+.metadata dt::after { content: ":"; }
+.metadata dd { margin: 0; overflow-wrap: anywhere; }
+.metadata code { padding: 0; color: inherit; background: transparent; }
+
+.page-shell,
+.document-footer {
+  width: min(1440px, 100%);
+  margin-inline: auto;
+}
+.page-shell {
+  padding: clamp(1rem, 3vw, 2.6rem);
+  display: grid;
+  grid-template-columns: minmax(220px, 270px) minmax(0, 1fr);
+  gap: clamp(1rem, 3vw, 2.5rem);
+  align-items: start;
+}
+.toc {
+  position: sticky;
+  top: 1.5rem;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  padding: 1.15rem .35rem 1.15rem 0;
+  color: var(--muted);
+  font-size: .82rem;
+  line-height: 1.35;
+  scrollbar-width: thin;
+}
+.toc-title {
+  margin: 0 0 .85rem .75rem;
+  color: var(--ink);
+  font-size: .7rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.toc ol { margin: 0; padding: 0; list-style: none; }
+.toc li { margin: .12rem 0; }
+.toc li[data-level="3"] { padding-left: .85rem; }
+.toc a {
+  display: block;
+  padding: .38rem .72rem;
+  color: var(--muted);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  border-radius: 0 .3rem .3rem 0;
+}
+.toc a:hover, .toc a:focus-visible {
+  color: var(--ink);
+  border-left-color: var(--accent);
+  background: rgb(251 252 253 / 82%);
+}
+.mobile-toc { display: none; }
+
+.document-content {
+  min-width: 0;
+  overflow: hidden;
+  background: var(--sheet);
+  border: 1px solid rgb(85 104 116 / 22%);
+  box-shadow: var(--shadow);
+}
+.document-intro > .source-block:first-child {
+  padding: clamp(2.2rem, 7vw, 6.2rem) clamp(1.2rem, 6vw, 5.5rem) 1rem;
+}
+.document-intro > .source-block:first-child h1 {
+  max-width: 18ch;
+  margin: 0;
+  font-family: var(--serif);
+  font-size: clamp(3rem, 6vw, 6.3rem);
+  font-weight: 500;
+  line-height: .96;
+  letter-spacing: -.045em;
+  text-wrap: balance;
+}
+.document-intro > .source-block:not(:first-child) {
+  padding-inline: clamp(1.2rem, 6vw, 5.5rem);
+}
+.document-intro > .source-block:last-child {
+  padding-bottom: clamp(2.5rem, 7vw, 5.5rem);
+}
+.document-intro blockquote {
+  width: fit-content;
+  margin: .2rem 0;
+  padding: .4rem .75rem;
+  color: #314d5e;
+  background: var(--accent-soft);
+  border: 1px solid #b9cbd4;
+  border-radius: 999px;
+  font-size: .82rem;
+  font-weight: 740;
+}
+.document-intro blockquote p { margin: 0; }
+
+.document-section {
+  padding: clamp(2.3rem, 6vw, 5rem) clamp(1.2rem, 6vw, 5.5rem);
+  border-top: 1px solid var(--line);
+}
+.document-intro + .document-section {
+  color: #f4f7f9;
+  background: var(--ink);
+  border-top: 0;
+}
+.document-intro + .document-section h2 { color: white; }
+.document-intro + .document-section p,
+.document-intro + .document-section li { color: #dce5e9; }
+.document-intro + .document-section a { color: #bad0da; }
+.source-block { min-width: 0; }
+.source-block > :first-child { margin-top: 0; }
+.source-block > :last-child { margin-bottom: 0; }
+.source-block + .source-block { margin-top: .85rem; }
+h1, h2, h3, h4 { color: var(--ink); scroll-margin-top: 1.5rem; }
+.document-section h2 {
+  max-width: 24ch;
+  margin: 0 0 1.7rem;
+  font-family: var(--serif);
+  font-size: clamp(2rem, 3.4vw, 3.5rem);
+  font-weight: 500;
+  line-height: 1.04;
+  letter-spacing: -.028em;
+  text-wrap: balance;
+}
+.document-section h3 {
+  margin: 2.8rem 0 1rem;
+  color: #3f6575;
+  font-size: .78rem;
+  line-height: 1.3;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.document-section h4 { font-size: 1rem; }
+p { max-width: 76ch; margin: .85rem 0; }
+strong { font-weight: 780; }
+ul, ol { max-width: 80ch; padding-left: 1.25rem; }
+li { margin: .48rem 0; padding-left: .28rem; }
+li::marker { color: var(--accent); font-weight: 800; }
+
+blockquote {
+  margin-inline: 0;
+  padding: .8rem 1rem;
+  border-left: 4px solid var(--accent);
+  background: #e8eef2;
+  color: #314854;
+}
+blockquote > :first-child { margin-top: 0; }
+blockquote > :last-child { margin-bottom: 0; }
+code, pre { font-family: var(--mono); }
+code {
+  padding: .12rem .32rem;
+  border-radius: .25rem;
+  color: #315565;
+  background: #e2ebf0;
+  font-size: .86em;
+}
+pre {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 1.35rem 0;
+  padding: 1.15rem 1.25rem;
+  color: #edf3f6;
+  background: var(--code);
+  border-radius: .5rem;
+  line-height: 1.55;
+  white-space: pre;
+}
+pre code { padding: 0; color: inherit; background: transparent; white-space: pre; }
+.table-wrap { width: 100%; overflow-x: auto; margin: 1.5rem 0; }
+table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: .88rem;
+  line-height: 1.45;
+}
+th, td {
+  padding: .85rem .9rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+th {
+  color: var(--sheet);
+  background: var(--ink);
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+tbody tr:nth-child(even) { background: #eff3f5; }
+.diagram {
+  margin: 2rem 0;
+  padding: clamp(.7rem, 2vw, 1.5rem);
+  background: #f0f4f6;
+  border: 1px solid var(--line);
+  border-radius: .65rem;
+}
+.diagram img {
+  display: block;
+  width: min(100%, 880px);
+  height: auto;
+  max-height: 650px;
+  margin: 0 auto;
+  object-fit: contain;
+}
+.diagram-wide {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+.diagram-wide img {
+  width: max(100%, 1600px);
+  max-height: none;
+  margin-inline: 0;
+}
+.diagram figcaption { margin-top: .8rem; color: var(--muted); text-align: center; font-size: .82rem; }
+.diagram details { margin-top: .8rem; }
+.diagram summary { cursor: pointer; color: var(--accent); font-weight: 650; }
+.diagram details pre { max-height: 18rem; }
+.document-footer {
+  padding: .2rem clamp(1rem, 4vw, 3rem) 2.5rem;
+  color: var(--muted);
+  font-size: .76rem;
+  text-align: right;
+}
+
+@media (max-width: 900px) {
+  .document-header__inner { align-items: flex-start; flex-direction: column; }
+  .metadata { justify-content: flex-start; }
+  .page-shell { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .toc { display: none; }
+  .mobile-toc {
+    display: block;
+    background: rgb(251 252 253 / 82%);
+    border: 1px solid var(--line);
+  }
+  .mobile-toc summary {
+    padding: .8rem 1rem;
+    color: var(--ink);
+    cursor: pointer;
+    font-size: .75rem;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .mobile-toc nav { padding: 0 1rem 1rem; font-size: .82rem; }
+  .mobile-toc ol { margin: 0; padding: 0; list-style: none; }
+  .mobile-toc li { margin: .25rem 0; }
+  .mobile-toc li[data-level="3"] { padding-left: .85rem; }
+  .mobile-toc a { color: var(--muted); text-decoration: none; }
+}
+
+@media (max-width: 560px) {
+  :root { font-size: 16px; }
+  .document-header__inner { padding: .85rem 1rem; }
+  .metadata { gap: .4rem; }
+  .metadata__item { max-width: 100%; }
+  .page-shell { padding: .75rem; }
+  .document-intro > .source-block:first-child { padding-top: 2.6rem; }
+  .document-intro > .source-block:first-child h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+  .document-intro blockquote { border-radius: .4rem; }
+  .document-section { padding-top: 2.8rem; padding-bottom: 2.8rem; }
+  .document-section h2 { font-size: 2.15rem; }
+  figure.diagram { overflow-x: auto; }
+  figure.diagram img { min-width: 360px; }
+}
+
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+@media print {
+  :root { background: white; font-size: 10.5pt; line-height: 1.45; }
+  @page { size: auto; margin: 16mm; }
+  html, body { background: white; }
+  .document-header, .toc, .mobile-toc, .skip-link { display: none; }
+  .page-shell { display: block; width: auto; margin: 0; padding: 0; }
+  .document-content { overflow: visible; border: 0; box-shadow: none; }
+  .document-intro > .source-block:first-child { padding: 0 0 8mm; }
+  .document-intro > .source-block:first-child h1 { font-size: 32pt; }
+  .document-intro > .source-block:not(:first-child) { padding-inline: 0; }
+  .document-intro > .source-block:last-child { padding-bottom: 10mm; }
+  .document-section,
+  .document-intro + .document-section {
+    padding: 9mm 0;
+    color: var(--ink);
+    background: white;
+    break-inside: auto;
+  }
+  .document-intro + .document-section h2,
+  .document-intro + .document-section p,
+  .document-intro + .document-section li { color: var(--ink); }
+  h1, h2, h3, h4 { break-after: avoid-page; }
+  p, li { orphans: 3; widows: 3; }
+  table { min-width: 0; font-size: 8pt; }
+  thead { display: table-header-group; }
+  tr, figure, pre, blockquote { break-inside: avoid; }
+  .diagram-wide { overflow: visible; }
+  .diagram-wide img { width: 100%; max-height: 650px; margin-inline: auto; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  a { color: inherit; text-decoration: none; }
+  .document-footer { width: auto; padding: 8mm 0 0; }
+}
+</style>
+</head>
+<body>
+  <a class="skip-link" href="#document-content">Skip to document</a>
+  <header class="document-header" aria-label="Document metadata">
+    <div class="document-header__inner">
+      <div class="document-brand"><span class="document-brand__mark" aria-hidden="true">B</span>Blueprint document</div>
+      <dl class="metadata">
+        <div class="metadata__item"><dt>Kind</dt><dd>Technical design</dd></div>
+        <div class="metadata__item"><dt>Status</dt><dd>Proposed for review</dd></div>
+        <div class="metadata__item"><dt>Source</dt><dd>docs/cloud-run-agents/design.md</dd></div>
+        <div class="metadata__item"><dt>Revision</dt><dd><code title="4d3010d2cacf41ee85a4082d0e99d960f13bfcbd09116d9c4975bfac04781864">4d3010d2cacf</code></dd></div>
+      </dl>
+    </div>
+  </header>
+  <div class="page-shell">
+    <aside class="mobile-toc" aria-label="Document navigation"><details><summary>Contents</summary><nav aria-label="Document sections on small screens"><ol><li data-level="2"><a href="#1-executive-summary">1. Executive summary</a></li><li data-level="2"><a href="#2-context-and-scope">2. Context and scope</a></li><li data-level="2"><a href="#3-system-context">3. System context</a></li><li data-level="2"><a href="#4-proposed-design">4. Proposed design</a></li><li data-level="3"><a href="#how-it-works">How it works</a></li><li data-level="3"><a href="#guided-setup-and-operator-experience">Guided setup and operator experience</a></li><li data-level="3"><a href="#google-cloud-deployment-and-authentication">Google Cloud deployment and authentication</a></li><li data-level="3"><a href="#delivery-sequence">Delivery sequence</a></li><li data-level="3"><a href="#components-and-responsibilities">Components and responsibilities</a></li><li data-level="3"><a href="#decisions">Decisions</a></li><li data-level="2"><a href="#5-invariants-and-requirements">5. Invariants and requirements</a></li><li data-level="3"><a href="#invariants">Invariants</a></li><li data-level="3"><a href="#requirements">Requirements</a></li><li data-level="2"><a href="#6-interfaces-and-data">6. Interfaces and data</a></li><li data-level="3"><a href="#backend-profile">Backend profile</a></li><li data-level="3"><a href="#naming-and-identity">Naming and identity</a></li><li data-level="3"><a href="#dispatch-record">Dispatch record</a></li><li data-level="3"><a href="#object-layout">Object layout</a></li><li data-level="3"><a href="#dispatch-states">Dispatch states</a></li><li data-level="3"><a href="#normative-state-machine">Normative state machine</a></li><li data-level="3"><a href="#authority-lease-protocol">Authority lease protocol</a></li><li data-level="2"><a href="#7-failure-behavior-and-lifecycle">7. Failure behavior and lifecycle</a></li><li data-level="2"><a href="#8-security-privacy-and-operations">8. Security, privacy, and operations</a></li><li data-level="2"><a href="#9-acceptance-criteria">9. Acceptance criteria</a></li><li data-level="2"><a href="#10-test-approach">10. Test approach</a></li><li data-level="2"><a href="#11-risks-and-tradeoffs">11. Risks and tradeoffs</a></li><li data-level="2"><a href="#12-open-questions">12. Open questions</a></li><li data-level="2"><a href="#13-out-of-scope">13. Out of scope</a></li></ol></nav></details></aside><nav class="toc" aria-label="Document contents"><p class="toc-title">On this page</p><ol><li data-level="2"><a href="#1-executive-summary">1. Executive summary</a></li><li data-level="2"><a href="#2-context-and-scope">2. Context and scope</a></li><li data-level="2"><a href="#3-system-context">3. System context</a></li><li data-level="2"><a href="#4-proposed-design">4. Proposed design</a></li><li data-level="3"><a href="#how-it-works">How it works</a></li><li data-level="3"><a href="#guided-setup-and-operator-experience">Guided setup and operator experience</a></li><li data-level="3"><a href="#google-cloud-deployment-and-authentication">Google Cloud deployment and authentication</a></li><li data-level="3"><a href="#delivery-sequence">Delivery sequence</a></li><li data-level="3"><a href="#components-and-responsibilities">Components and responsibilities</a></li><li data-level="3"><a href="#decisions">Decisions</a></li><li data-level="2"><a href="#5-invariants-and-requirements">5. Invariants and requirements</a></li><li data-level="3"><a href="#invariants">Invariants</a></li><li data-level="3"><a href="#requirements">Requirements</a></li><li data-level="2"><a href="#6-interfaces-and-data">6. Interfaces and data</a></li><li data-level="3"><a href="#backend-profile">Backend profile</a></li><li data-level="3"><a href="#naming-and-identity">Naming and identity</a></li><li data-level="3"><a href="#dispatch-record">Dispatch record</a></li><li data-level="3"><a href="#object-layout">Object layout</a></li><li data-level="3"><a href="#dispatch-states">Dispatch states</a></li><li data-level="3"><a href="#normative-state-machine">Normative state machine</a></li><li data-level="3"><a href="#authority-lease-protocol">Authority lease protocol</a></li><li data-level="2"><a href="#7-failure-behavior-and-lifecycle">7. Failure behavior and lifecycle</a></li><li data-level="2"><a href="#8-security-privacy-and-operations">8. Security, privacy, and operations</a></li><li data-level="2"><a href="#9-acceptance-criteria">9. Acceptance criteria</a></li><li data-level="2"><a href="#10-test-approach">10. Test approach</a></li><li data-level="2"><a href="#11-risks-and-tradeoffs">11. Risks and tradeoffs</a></li><li data-level="2"><a href="#12-open-questions">12. Open questions</a></li><li data-level="2"><a href="#13-out-of-scope">13. Out of scope</a></li></ol></nav>
+    <main id="document-content" class="document-content" tabindex="-1" data-source-block-count="161">
+<div class="document-intro">
+<section id="elastic-cloud-run-agent-backend" class="source-block"
+data-source-block="1"
+data-source-sha256="68484e4adae7fb6ddb4ab9cc7f3cf72dff2af847fc9a01084f5b4f12d6723bee">
+<h1>Elastic Cloud Run agent backend</h1>
+</section>
+<div class="source-block" data-source-block="2"
+data-source-sha256="f3cfda141bb0d969e973d91600064c759ac4c936fa82e9f2c3f6bb2a60fbb270">
+<blockquote>
+<p><strong>Status:</strong> Proposed for review</p>
+</blockquote>
+</div>
+</div>
+<div class="document-section">
+<section id="1-executive-summary" class="source-block role-summary"
+data-source-block="3"
+data-source-sha256="369eedb81a8602aa50ed832662b898c91ab782d2b66611d11a6b18d8001d4703">
+<h2>1. Executive summary</h2>
+</section>
+<div class="source-block" data-source-block="4"
+data-source-sha256="1fe40beb01bf87659d3cb5becca425fd53fc4822af97daf301b0df425eba4cea">
+<p>Factory currently runs every coding agent through a persistent Worker
+on a local machine or VM. That path is valuable because it can use
+authenticated subscription CLIs, reuse repository caches, and retain
+failed worktrees, but an operator must provide and maintain enough
+machines for peak demand.</p>
+</div>
+<div class="source-block" data-source-block="5"
+data-source-sha256="99ca16072f35ca6e0e9bed90749537ab916da88c372f386d24539d9ac1123f69">
+<p>This design adds Cloud Run Jobs as a second execution backend.
+Factory will start one disposable container for one Run Session, run Pi,
+Codex, or Claude Code with API-backed model access, ingest ordered
+events, preserve a recovery artifact, and stop paying for compute when
+the Job exits. The existing control plane remains the source of truth.
+Cloud Run provides managed compute, not a second scheduler or product
+model.</p>
+</div>
+<div class="source-block" data-source-block="6"
+data-source-sha256="9832c0919203341ef732b334dcb47e68075be9ee3444783de4c9b749e8c3b7de">
+<p>The first hosted deployment runs <code>factory-server</code> on a
+dedicated Compute Engine VM. Its attached dispatcher service account
+supplies metadata-backed workload credentials to Google client
+libraries. Factory calls Cloud Run and the Attempt gateway directly and
+never shells out to <code>gcloud</code> or loads a downloaded
+service-account key. Coding agents do not run on this VM because any
+process on it could otherwise request the attached identity from the
+metadata server.</p>
+</div>
+<div class="source-block" data-source-block="7"
+data-source-sha256="eb4dd41c1904ec71cba0af5ae92ec7baa0c433f187896e6eea6d3237a4118c14">
+<p>The main downside is weaker local recovery. An ephemeral Job cannot
+retain an inspectable worktree after it exits, so it must publish a
+durable, verified artifact before Factory accepts completion. Cloud Run
+also isolates a process from the operator's machine but does not make
+arbitrary repository code safe.</p>
+</div>
+</div>
+<div class="document-section">
+<section id="2-context-and-scope" class="source-block"
+data-source-block="8"
+data-source-sha256="7f27d9838429652fd04876b144f647ac2408f51de0d0db5fc261c40076a8d500">
+<h2>2. Context and scope</h2>
+</section>
+<div class="source-block" data-source-block="9"
+data-source-sha256="45e2e8387cca6232d8571b97e58c45a4c55ea8c9fc388cdf03573bea8ce11a9a">
+<p>The current <a href="../../ARCHITECTURE.md">architecture</a>
+separates durable coordination from agent execution. A persistent Worker claims work, prepares a worktree, owns a 30-second Attempt lease, starts
+one runtime process, sends events, observes cancellation, and retains
+uncertain Git state. Local and VM Workers use the same lifecycle
+contract.</p>
+</div>
+<div class="source-block" data-source-block="10"
+data-source-sha256="5aac4844c17846ee378d16d7a43344f9856707530279b357a9676802b485663a">
+<p>The <a rel="noopener noreferrer" href="https://github.com/owainlewis/factory/pull/275">Cloud
+Run experiment</a> proved a narrower path against the Factory
+repository:</p>
+</div>
+<div class="source-block" data-source-block="11"
+data-source-sha256="3aafc1c028fd7c2f399f1704542953283e6030ceb75453c0458935815bcc84de">
+<ul>
+<li>Cloud Build produced a pinned, non-root Pi container.</li>
+<li>A Cloud Run Job checked out an exact commit and ran Pi from that
+directory.</li>
+<li>Pi used DeepSeek V4 Flash through OpenRouter in read-only and write
+modes.</li>
+<li>Structured output omitted model reasoning and reported model
+cost.</li>
+<li>Write mode produced an exact patch without pushing a branch.</li>
+<li>The final read-only execution completed in 55 seconds, including a
+33-second start, with $0.00209 of model usage. At the current published
+default Cloud Run Jobs rates, its one-minute minimum would cost about $0.00132 before the free tier.</li>
+</ul>
+</div>
+<div class="source-block" data-source-block="12"
+data-source-sha256="0766ba43834465728ec376831de1cae90bdd791c82ba0c54d22f0746314b69ae">
+<p>That experiment proves container execution, not the Factory
+lifecycle. It does not prove durable dispatch, lease fencing, restart
+recovery, prompt cancellation, private repository access, event
+ingestion, or artifact retention. This design covers those boundaries
+for one Google Cloud project and region. It does not replace persistent
+Workers or generalize execution to every cloud provider.</p>
+</div>
+</div>
+<div class="document-section">
+<section id="3-system-context" class="source-block"
+data-source-block="13"
+data-source-sha256="40793fe15cdedd8ecf4489800820100043e0c3ebe6ee96e6db9b0dc8f866fabd">
+<h2>3. System context</h2>
+</section>
+<figure data-source-sha256="21543925bb0f2b0da453da0ea06b29cb43e446670babecb34d77ba32252a7d6e" class="diagram source-block diagram-wide" data-source-block="14"><img alt="Diagram 1 showing Operator through SSH tunnel, Tasks and Runs, Factory control plane, Attached dispatcher identity, Persistent Worker backend, Subscription or API-backed agent, Cloud Run dispatcher, One Cloud Run Job execution, API-backed agent, Cloud control and artifact storage, Attempt gateway, Git repository and external tools" src="data:image/svg+xml;base64,PHN2ZyBpZD0ibXktc3ZnIiB3aWR0aD0iMTAwJSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgY2xhc3M9ImZsb3djaGFydCIgc3R5bGU9Im1heC13aWR0aDogMTg1NS4zOHB4OyBiYWNrZ3JvdW5kLWNvbG9yOiB0cmFuc3BhcmVudDsiIHZpZXdCb3g9IjAgMCAxODU1LjM3NSA0NDguODAwMDE4MzEwNTQ2OSIgcm9sZT0iZ3JhcGhpY3MtZG9jdW1lbnQgZG9jdW1lbnQiIGFyaWEtcm9sZWRlc2NyaXB0aW9uPSJmbG93Y2hhcnQtdjIiPjxzdHlsZT4jbXktc3Zne2ZvbnQtZmFtaWx5OkludGVyLHVpLXNhbnMtc2VyaWYsc3lzdGVtLXVpLHNhbnMtc2VyaWY7Zm9udC1zaXplOjE2cHg7ZmlsbDojMTcyNjMwO31Aa2V5ZnJhbWVzIGVkZ2UtYW5pbWF0aW9uLWZyYW1le2Zyb217c3Ryb2tlLWRhc2hvZmZzZXQ6MDt9fUBrZXlmcmFtZXMgZGFzaHt0b3tzdHJva2UtZGFzaG9mZnNldDowO319I215LXN2ZyAuZWRnZS1hbmltYXRpb24tc2xvd3tzdHJva2UtZGFzaGFycmF5OjksNSFpbXBvcnRhbnQ7c3Ryb2tlLWRhc2hvZmZzZXQ6OTAwO2FuaW1hdGlvbjpkYXNoIDUwcyBsaW5lYXIgaW5maW5pdGU7c3Ryb2tlLWxpbmVjYXA6cm91bmQ7fSNteS1zdmcgLmVkZ2UtYW5pbWF0aW9uLWZhc3R7c3Ryb2tlLWRhc2hhcnJheTo5LDUhaW1wb3J0YW50O3N0cm9rZS1kYXNob2Zmc2V0OjkwMDthbmltYXRpb246ZGFzaCAyMHMgbGluZWFyIGluZmluaXRlO3N0cm9rZS1saW5lY2FwOnJvdW5kO30jbXktc3ZnIC5lcnJvci1pY29ue2ZpbGw6I2Y3ZjlmYjt9I215LXN2ZyAuZXJyb3ItdGV4dHtmaWxsOiMwODA2MDQ7c3Ryb2tlOiMwODA2MDQ7fSNteS1zdmcgLmVkZ2UtdGhpY2tuZXNzLW5vcm1hbHtzdHJva2Utd2lkdGg6MXB4O30jbXktc3ZnIC5lZGdlLXRoaWNrbmVzcy10aGlja3tzdHJva2Utd2lkdGg6My41cHg7fSNteS1zdmcgLmVkZ2UtcGF0dGVybi1zb2xpZHtzdHJva2UtZGFzaGFycmF5OjA7fSNteS1zdmcgLmVkZ2UtdGhpY2tuZXNzLWludmlzaWJsZXtzdHJva2Utd2lkdGg6MDtmaWxsOm5vbmU7fSNteS1zdmcgLmVkZ2UtcGF0dGVybi1kYXNoZWR7c3Ryb2tlLWRhc2hhcnJheTozO30jbXktc3ZnIC5lZGdlLXBhdHRlcm4tZG90dGVke3N0cm9rZS1kYXNoYXJyYXk6Mjt9I215LXN2ZyAubWFya2Vye2ZpbGw6IzUyNmE3OTtzdHJva2U6IzUyNmE3OTt9I215LXN2ZyAubWFya2VyLmNyb3Nze3N0cm9rZTojNTI2YTc5O30jbXktc3ZnIHN2Z3tmb250LWZhbWlseTpJbnRlcix1aS1zYW5zLXNlcmlmLHN5c3RlbS11aSxzYW5zLXNlcmlmO2ZvbnQtc2l6ZToxNnB4O30jbXktc3ZnIHB7bWFyZ2luOjA7fSNteS1zdmcgLmxhYmVse2ZvbnQtZmFtaWx5OkludGVyLHVpLXNhbnMtc2VyaWYsc3lzdGVtLXVpLHNhbnMtc2VyaWY7Y29sb3I6IzE3MjYzMDt9I215LXN2ZyAuY2x1c3Rlci1sYWJlbCB0ZXh0e2ZpbGw6IzA4MDYwNDt9I215LXN2ZyAuY2x1c3Rlci1sYWJlbCBzcGFue2NvbG9yOiMwODA2MDQ7fSNteS1zdmcgLmNsdXN0ZXItbGFiZWwgc3BhbiBwe2JhY2tncm91bmQtY29sb3I6dHJhbnNwYXJlbnQ7fSNteS1zdmcgLmxhYmVsIHRleHQsI215LXN2ZyBzcGFue2ZpbGw6IzE3MjYzMDtjb2xvcjojMTcyNjMwO30jbXktc3ZnIC5ub2RlIHJlY3QsI215LXN2ZyAubm9kZSBjaXJjbGUsI215LXN2ZyAubm9kZSBlbGxpcHNlLCNteS1zdmcgLm5vZGUgcG9seWdvbiwjbXktc3ZnIC5ub2RlIHBhdGh7ZmlsbDojZGJlNWVjO3N0cm9rZTojNjA3OThhO3N0cm9rZS13aWR0aDoxcHg7fSNteS1zdmcgLnJvdWdoLW5vZGUgLmxhYmVsIHRleHQsI215LXN2ZyAubm9kZSAubGFiZWwgdGV4dCwjbXktc3ZnIC5pbWFnZS1zaGFwZSAubGFiZWwsI215LXN2ZyAuaWNvbi1zaGFwZSAubGFiZWx7dGV4dC1hbmNob3I6bWlkZGxlO30jbXktc3ZnIC5ub2RlIC5rYXRleCBwYXRoe2ZpbGw6IzAwMDtzdHJva2U6IzAwMDtzdHJva2Utd2lkdGg6MXB4O30jbXktc3ZnIC5yb3VnaC1ub2RlIC5sYWJlbCwjbXktc3ZnIC5ub2RlIC5sYWJlbCwjbXktc3ZnIC5pbWFnZS1zaGFwZSAubGFiZWwsI215LXN2ZyAuaWNvbi1zaGFwZSAubGFiZWx7dGV4dC1hbGlnbjpjZW50ZXI7fSNteS1zdmcgLm5vZGUuY2xpY2thYmxle2N1cnNvcjpwb2ludGVyO30jbXktc3ZnIC5yb290IC5hbmNob3IgcGF0aHtmaWxsOiM1MjZhNzkhaW1wb3J0YW50O3N0cm9rZS13aWR0aDowO3N0cm9rZTojNTI2YTc5O30jbXktc3ZnIC5hcnJvd2hlYWRQYXRoe2ZpbGw6IzA4MDYwNDt9I215LXN2ZyAuZWRnZVBhdGggLnBhdGh7c3Ryb2tlOiM1MjZhNzk7c3Ryb2tlLXdpZHRoOjFweDt9I215LXN2ZyAuZmxvd2NoYXJ0LWxpbmt7c3Ryb2tlOiM1MjZhNzk7ZmlsbDpub25lO30jbXktc3ZnIC5lZGdlTGFiZWx7YmFja2dyb3VuZC1jb2xvcjojZWRmMmY1O3RleHQtYWxpZ246Y2VudGVyO30jbXktc3ZnIC5lZGdlTGFiZWwgcHtiYWNrZ3JvdW5kLWNvbG9yOiNlZGYyZjU7fSNteS1zdmcgLmVkZ2VMYWJlbCByZWN0e29wYWNpdHk6MC41O2JhY2tncm91bmQtY29sb3I6I2VkZjJmNTtmaWxsOiNlZGYyZjU7fSNteS1zdmcgLmxhYmVsQmtne2JhY2tncm91bmQtY29sb3I6cmdiYSgyMzcsIDI0MiwgMjQ1LCAwLjUpO30jbXktc3ZnIC5jbHVzdGVyIHJlY3R7ZmlsbDojZjdmOWZiO3N0cm9rZTpoc2woMjEwLCAwJSwgODcuNjQ3MDU4ODIzNSUpO3N0cm9rZS13aWR0aDoxcHg7fSNteS1zdmcgLmNsdXN0ZXIgdGV4dHtmaWxsOiMwODA2MDQ7fSNteS1zdmcgLmNsdXN0ZXIgc3Bhbntjb2xvcjojMDgwNjA0O30jbXktc3ZnIGRpdi5tZXJtYWlkVG9vbHRpcHtwb3NpdGlvbjphYnNvbHV0ZTt0ZXh0LWFsaWduOmNlbnRlcjttYXgtd2lkdGg6MjAwcHg7cGFkZGluZzoycHg7Zm9udC1mYW1pbHk6SW50ZXIsdWktc2Fucy1zZXJpZixzeXN0ZW0tdWksc2Fucy1zZXJpZjtmb250LXNpemU6MTJweDtiYWNrZ3JvdW5kOiNmN2Y5ZmI7Ym9yZGVyOjFweCBzb2xpZCBoc2woMjEwLCAwJSwgODcuNjQ3MDU4ODIzNSUpO2JvcmRlci1yYWRpdXM6MnB4O3BvaW50ZXItZXZlbnRzOm5vbmU7ei1pbmRleDoxMDA7fSNteS1zdmcgLmZsb3djaGFydFRpdGxlVGV4dHt0ZXh0LWFuY2hvcjptaWRkbGU7Zm9udC1zaXplOjE4cHg7ZmlsbDojMTcyNjMwO30jbXktc3ZnIHJlY3QudGV4dHtmaWxsOm5vbmU7c3Ryb2tlLXdpZHRoOjA7fSNteS1zdmcgLmljb24tc2hhcGUsI215LXN2ZyAuaW1hZ2Utc2hhcGV7YmFja2dyb3VuZC1jb2xvcjojZWRmMmY1O3RleHQtYWxpZ246Y2VudGVyO30jbXktc3ZnIC5pY29uLXNoYXBlIHAsI215LXN2ZyAuaW1hZ2Utc2hhcGUgcHtiYWNrZ3JvdW5kLWNvbG9yOiNlZGYyZjU7cGFkZGluZzoycHg7fSNteS1zdmcgLmljb24tc2hhcGUgLmxhYmVsIHJlY3QsI215LXN2ZyAuaW1hZ2Utc2hhcGUgLmxhYmVsIHJlY3R7b3BhY2l0eTowLjU7YmFja2dyb3VuZC1jb2xvcjojZWRmMmY1O2ZpbGw6I2VkZjJmNTt9I215LXN2ZyAubGFiZWwtaWNvbntkaXNwbGF5OmlubGluZS1ibG9jaztoZWlnaHQ6MWVtO292ZXJmbG93OnZpc2libGU7dmVydGljYWwtYWxpZ246LTAuMTI1ZW07fSNteS1zdmcgLm5vZGUgLmxhYmVsLWljb24gcGF0aHtmaWxsOmN1cnJlbnRDb2xvcjtzdHJva2U6cmV2ZXJ0O3N0cm9rZS13aWR0aDpyZXZlcnQ7fSNteS1zdmcgLm5vZGUgLm5lby1ub2Rle3N0cm9rZTojNjA3OThhO30jbXktc3ZnIFtkYXRhLWxvb2s9Im5lbyJdLm5vZGUgcmVjdCwjbXktc3ZnIFtkYXRhLWxvb2s9Im5lbyJdLmNsdXN0ZXIgcmVjdCwjbXktc3ZnIFtkYXRhLWxvb2s9Im5lbyJdLm5vZGUgcG9seWdvbntzdHJva2U6dXJsKCNteS1zdmctZ3JhZGllbnQpO2ZpbHRlcjpkcm9wLXNoYWRvdyggMXB4IDJweCAycHggcmdiYSgxODUsMTg1LDE4NSwxKSk7fSNteS1zdmcgW2RhdGEtbG9vaz0ibmVvIl0uc3dpbWxhbmUuY2x1c3RlciByZWN0e2ZpbHRlcjpub25lO30jbXktc3ZnIFtkYXRhLWxvb2s9Im5lbyJdLm5vZGUgcGF0aHtzdHJva2U6dXJsKCNteS1zdmctZ3JhZGllbnQpO3N0cm9rZS13aWR0aDoxcHg7fSNteS1zdmcgW2RhdGEtbG9vaz0ibmVvIl0ubm9kZSAub3V0ZXItcGF0aHtmaWx0ZXI6ZHJvcC1zaGFkb3coIDFweCAycHggMnB4IHJnYmEoMTg1LDE4NSwxODUsMSkpO30jbXktc3ZnIFtkYXRhLWxvb2s9Im5lbyJdLm5vZGUgLm5lby1saW5lIHBhdGh7c3Ryb2tlOiM2MDc5OGE7ZmlsdGVyOm5vbmU7fSNteS1zdmcgW2RhdGEtbG9vaz0ibmVvIl0ubm9kZSBjaXJjbGV7c3Ryb2tlOnVybCgjbXktc3ZnLWdyYWRpZW50KTtmaWx0ZXI6ZHJvcC1zaGFkb3coIDFweCAycHggMnB4IHJnYmEoMTg1LDE4NSwxODUsMSkpO30jbXktc3ZnIFtkYXRhLWxvb2s9Im5lbyJdLm5vZGUgY2lyY2xlIC5zdGF0ZS1zdGFydHtmaWxsOiMwMDAwMDA7fSNteS1zdmcgW2RhdGEtbG9vaz0ibmVvIl0uaWNvbi1zaGFwZSAuaWNvbntmaWxsOnVybCgjbXktc3ZnLWdyYWRpZW50KTtmaWx0ZXI6ZHJvcC1zaGFkb3coIDFweCAycHggMnB4IHJnYmEoMTg1LDE4NSwxODUsMSkpO30jbXktc3ZnIFtkYXRhLWxvb2s9Im5lbyJdLmljb24tc2hhcGUgLmljb24tbmVvIHBhdGh7c3Ryb2tlOnVybCgjbXktc3ZnLWdyYWRpZW50KTtmaWx0ZXI6ZHJvcC1zaGFkb3coIDFweCAycHggMnB4IHJnYmEoMTg1LDE4NSwxODUsMSkpO30jbXktc3ZnIDpyb290ey0tbWVybWFpZC1mb250LWZhbWlseToidHJlYnVjaGV0IG1zIix2ZXJkYW5hLGFyaWFsLHNhbnMtc2VyaWY7fTwvc3R5bGU+PGc+PG1hcmtlciBpZD0ibXktc3ZnX2Zsb3djaGFydC12Mi1wb2ludEVuZCIgY2xhc3M9Im1hcmtlciBmbG93Y2hhcnQtdjIiIHZpZXdCb3g9IjAgMCAxMCAxMCIgcmVmWD0iNSIgcmVmWT0iNSIgbWFya2VyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiBtYXJrZXJXaWR0aD0iOCIgbWFya2VySGVpZ2h0PSI4IiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0gMCAwIEwgMTAgNSBMIDAgMTAgeiIgY2xhc3M9ImFycm93TWFya2VyUGF0aCIgc3R5bGU9InN0cm9rZS13aWR0aDogMTsgc3Ryb2tlLWRhc2hhcnJheTogMSwgMDsiLz48L21hcmtlcj48bWFya2VyIGlkPSJteS1zdmdfZmxvd2NoYXJ0LXYyLXBvaW50U3RhcnQiIGNsYXNzPSJtYXJrZXIgZmxvd2NoYXJ0LXYyIiB2aWV3Qm94PSIwIDAgMTAgMTAiIHJlZlg9IjQuNSIgcmVmWT0iNSIgbWFya2VyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiBtYXJrZXJXaWR0aD0iOCIgbWFya2VySGVpZ2h0PSI4IiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0gMCA1IEwgMTAgMTAgTCAxMCAwIHoiIGNsYXNzPSJhcnJvd01hcmtlclBhdGgiIHN0eWxlPSJzdHJva2Utd2lkdGg6IDE7IHN0cm9rZS1kYXNoYXJyYXk6IDEsIDA7Ii8+PC9tYXJrZXI+PG1hcmtlciBpZD0ibXktc3ZnX2Zsb3djaGFydC12Mi1wb2ludEVuZC1tYXJnaW4iIGNsYXNzPSJtYXJrZXIgZmxvd2NoYXJ0LXYyIiB2aWV3Qm94PSIwIDAgMTEuNSAxNCIgcmVmWD0iMTEuNSIgcmVmWT0iNyIgbWFya2VyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiBtYXJrZXJXaWR0aD0iMTAuNSIgbWFya2VySGVpZ2h0PSIxNCIgb3JpZW50PSJhdXRvIj48cGF0aCBkPSJNIDAgMCBMIDExLjUgNyBMIDAgMTQgeiIgY2xhc3M9ImFycm93TWFya2VyUGF0aCIgc3R5bGU9InN0cm9rZS13aWR0aDogMDsgc3Ryb2tlLWRhc2hhcnJheTogMSwgMDsiLz48L21hcmtlcj48bWFya2VyIGlkPSJteS1zdmdfZmxvd2NoYXJ0LXYyLXBvaW50U3RhcnQtbWFyZ2luIiBjbGFzcz0ibWFya2VyIGZsb3djaGFydC12MiIgdmlld0JveD0iMCAwIDExLjUgMTQiIHJlZlg9IjEiIHJlZlk9IjciIG1hcmtlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgbWFya2VyV2lkdGg9IjExLjUiIG1hcmtlckhlaWdodD0iMTQiIG9yaWVudD0iYXV0byI+PHBvbHlnb24gcG9pbnRzPSIwLDcgMTEuNSwxNCAxMS41LDAiIGNsYXNzPSJhcnJvd01hcmtlclBhdGgiIHN0eWxlPSJzdHJva2Utd2lkdGg6IDA7IHN0cm9rZS1kYXNoYXJyYXk6IDEsIDA7Ii8+PC9tYXJrZXI+PG1hcmtlciBpZD0ibXktc3ZnX2Zsb3djaGFydC12Mi1jaXJjbGVFbmQiIGNsYXNzPSJtYXJrZXIgZmxvd2NoYXJ0LXYyIiB2aWV3Qm94PSIwIDAgMTAgMTAiIHJlZlg9IjExIiByZWZZPSI1IiBtYXJrZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIG1hcmtlcldpZHRoPSIxMSIgbWFya2VySGVpZ2h0PSIxMSIgb3JpZW50PSJhdXRvIj48Y2lyY2xlIGN4PSI1IiBjeT0iNSIgcj0iNSIgY2xhc3M9ImFycm93TWFya2VyUGF0aCIgc3R5bGU9InN0cm9rZS13aWR0aDogMTsgc3Ryb2tlLWRhc2hhcnJheTogMSwgMDsiLz48L21hcmtlcj48bWFya2VyIGlkPSJteS1zdmdfZmxvd2NoYXJ0LXYyLWNpcmNsZVN0YXJ0IiBjbGFzcz0ibWFya2VyIGZsb3djaGFydC12MiIgdmlld0JveD0iMCAwIDEwIDEwIiByZWZYPSItMSIgcmVmWT0iNSIgbWFya2VyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiBtYXJrZXJXaWR0aD0iMTEiIG1hcmtlckhlaWdodD0iMTEiIG9yaWVudD0iYXV0byI+PGNpcmNsZSBjeD0iNSIgY3k9IjUiIHI9IjUiIGNsYXNzPSJhcnJvd01hcmtlclBhdGgiIHN0eWxlPSJzdHJva2Utd2lkdGg6IDE7IHN0cm9rZS1kYXNoYXJyYXk6IDEsIDA7Ii8+PC9tYXJrZXI+PG1hcmtlciBpZD0ibXktc3ZnX2Zsb3djaGFydC12Mi1jaXJjbGVFbmQtbWFyZ2luIiBjbGFzcz0ibWFya2VyIGZsb3djaGFydC12MiIgdmlld0JveD0iMCAwIDEwIDEwIiByZWZZPSI1IiByZWZYPSIxMi4yNSIgbWFya2VyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiBtYXJrZXJXaWR0aD0iMTQiIG1hcmtlckhlaWdodD0iMTQiIG9yaWVudD0iYXV0byI+PGNpcmNsZSBjeD0iNSIgY3k9IjUiIHI9IjUiIGNsYXNzPSJhcnJvd01hcmtlclBhdGgiIHN0eWxlPSJzdHJva2Utd2lkdGg6IDA7IHN0cm9rZS1kYXNoYXJyYXk6IDEsIDA7Ii8+PC9tYXJrZXI+PG1hcmtlciBpZD0ibXktc3ZnX2Zsb3djaGFydC12Mi1jaXJjbGVTdGFydC1tYXJnaW4iIGNsYXNzPSJtYXJrZXIgZmxvd2NoYXJ0LXYyIiB2aWV3Qm94PSIwIDAgMTAgMTAiIHJlZlg9Ii0yIiByZWZZPSI1IiBtYXJrZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIG1hcmtlcldpZHRoPSIxNCIgbWFya2VySGVpZ2h0PSIxNCIgb3JpZW50PSJhdXRvIj48Y2lyY2xlIGN4PSI1IiBjeT0iNSIgcj0iNSIgY2xhc3M9ImFycm93TWFya2VyUGF0aCIgc3R5bGU9InN0cm9rZS13aWR0aDogMDsgc3Ryb2tlLWRhc2hhcnJheTogMSwgMDsiLz48L21hcmtlcj48bWFya2VyIGlkPSJteS1zdmdfZmxvd2NoYXJ0LXYyLWNyb3NzRW5kIiBjbGFzcz0ibWFya2VyIGNyb3NzIGZsb3djaGFydC12MiIgdmlld0JveD0iMCAwIDExIDExIiByZWZYPSIxMiIgcmVmWT0iNS4yIiBtYXJrZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIG1hcmtlcldpZHRoPSIxMSIgbWFya2VySGVpZ2h0PSIxMSIgb3JpZW50PSJhdXRvIj48cGF0aCBkPSJNIDEsMSBsIDksOSBNIDEwLDEgbCAtOSw5IiBjbGFzcz0iYXJyb3dNYXJrZXJQYXRoIiBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAyOyBzdHJva2UtZGFzaGFycmF5OiAxLCAwOyIvPjwvbWFya2VyPjxtYXJrZXIgaWQ9Im15LXN2Z19mbG93Y2hhcnQtdjItY3Jvc3NTdGFydCIgY2xhc3M9Im1hcmtlciBjcm9zcyBmbG93Y2hhcnQtdjIiIHZpZXdCb3g9IjAgMCAxMSAxMSIgcmVmWD0iLTEiIHJlZlk9IjUuMiIgbWFya2VyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiBtYXJrZXJXaWR0aD0iMTEiIG1hcmtlckhlaWdodD0iMTEiIG9yaWVudD0iYXV0byI+PHBhdGggZD0iTSAxLDEgbCA5LDkgTSAxMCwxIGwgLTksOSIgY2xhc3M9ImFycm93TWFya2VyUGF0aCIgc3R5bGU9InN0cm9rZS13aWR0aDogMjsgc3Ryb2tlLWRhc2hhcnJheTogMSwgMDsiLz48L21hcmtlcj48bWFya2VyIGlkPSJteS1zdmdfZmxvd2NoYXJ0LXYyLWNyb3NzRW5kLW1hcmdpbiIgY2xhc3M9Im1hcmtlciBjcm9zcyBmbG93Y2hhcnQtdjIiIHZpZXdCb3g9IjAgMCAxNSAxNSIgcmVmWD0iMTcuNyIgcmVmWT0iNy41IiBtYXJrZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIG1hcmtlcldpZHRoPSIxMiIgbWFya2VySGVpZ2h0PSIxMiIgb3JpZW50PSJhdXRvIj48cGF0aCBkPSJNIDEsMSBMIDE0LDE0IE0gMSwxNCBMIDE0LDEiIGNsYXNzPSJhcnJvd01hcmtlclBhdGgiIHN0eWxlPSJzdHJva2Utd2lkdGg6IDIuNTsiLz48L21hcmtlcj48bWFya2VyIGlkPSJteS1zdmdfZmxvd2NoYXJ0LXYyLWNyb3NzU3RhcnQtbWFyZ2luIiBjbGFzcz0ibWFya2VyIGNyb3NzIGZsb3djaGFydC12MiIgdmlld0JveD0iMCAwIDE1IDE1IiByZWZYPSItMy41IiByZWZZPSI3LjUiIG1hcmtlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgbWFya2VyV2lkdGg9IjEyIiBtYXJrZXJIZWlnaHQ9IjEyIiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0gMSwxIEwgMTQsMTQgTSAxLDE0IEwgMTQsMSIgY2xhc3M9ImFycm93TWFya2VyUGF0aCIgc3R5bGU9InN0cm9rZS13aWR0aDogMi41OyBzdHJva2UtZGFzaGFycmF5OiAxLCAwOyIvPjwvbWFya2VyPjxnIGNsYXNzPSJyb290Ij48ZyBjbGFzcz0iY2x1c3RlcnMiLz48ZyBjbGFzcz0iZWRnZVBhdGhzIj48cGF0aCBkPSJNMjM1LjkwNiwxODVMMjQwLjA3MywxODVDMjQ0LjI0LDE4NSwyNTIuNTczLDE4NSwyNjEuOTE4LDE4NUMyNzEuMjYzLDE4NSwyODEuNjIsMTg1LDI4Ni43OTgsMTg1TDI5MS45NzcsMTg1IiBpZD0ibXktc3ZnLUxfT19SXzAiIGNsYXNzPSJlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGVkZ2UtdGhpY2tuZXNzLW5vcm1hbCBlZGdlLXBhdHRlcm4tc29saWQgZmxvd2NoYXJ0LWxpbmsiIHN0eWxlPSI7IiBkYXRhLWVkZ2U9InRydWUiIGRhdGEtZXQ9ImVkZ2UiIGRhdGEtaWQ9IkxfT19SXzAiIGRhdGEtcG9pbnRzPSJXM3NpZUNJNk1qTTFMamt3TmpJMUxDSjVJam94T0RRdU9UazVPVGs0TURreU5qVXhNemQ5TEhzaWVDSTZNall3TGprd05qSTFMQ0o1SWpveE9EUXVPVGs1T1RrNE1Ea3lOalV4TXpkOUxIc2llQ0k2TWprMUxqazNOalUyTWpVc0lua2lPakU0TkM0NU9UazVPVGd3T1RJMk5URXpOMzFkIiBkYXRhLWxvb2s9ImNsYXNzaWMiIG1hcmtlci1lbmQ9InVybCgjbXktc3ZnX2Zsb3djaGFydC12Mi1wb2ludEVuZCkiLz48cGF0aCBkPSJNNDg5LjE2NCwxODVMNDk1LjAwOSwxODVDNTAwLjg1NCwxODUsNTEyLjU0NCwxODUsNTI5Ljk2MiwxODkuNjUxQzU0Ny4zOCwxOTQuMzAzLDU3MC41MjYsMjAzLjYwNiw1ODIuMDk5LDIwOC4yNTdMNTkzLjY3MiwyMTIuOTA4IiBpZD0ibXktc3ZnLUxfUl9DUF8wIiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIiBzdHlsZT0iOyIgZGF0YS1lZGdlPSJ0cnVlIiBkYXRhLWV0PSJlZGdlIiBkYXRhLWlkPSJMX1JfQ1BfMCIgZGF0YS1wb2ludHM9Ilczc2llQ0k2TkRnNUxqRTJOREEyTWpVc0lua2lPakU0TkM0NU9UazVPVGd3T1RJMk5URXpOMzBzZXlKNElqbzFNalF1TWpNME16YzFMQ0o1SWpveE9EUXVPVGs1T1RrNE1Ea3lOalV4TXpkOUxIc2llQ0k2TlRrM0xqTTRNemt6TWpJek9EUTFNalVzSW5raU9qSXhOQzR6T1RrNU9UYzNNVEV4T0RFMk5IMWQiIGRhdGEtbG9vaz0iY2xhc3NpYyIgbWFya2VyLWVuZD0idXJsKCNteS1zdmdfZmxvd2NoYXJ0LXYyLXBvaW50RW5kKSIvPjxwYXRoIGQ9Ik00OTkuMjM0LDI5My44TDUwMy40MDEsMjkzLjhDNTA3LjU2OCwyOTMuOCw1MTUuOTAxLDI5My44LDUzMS42NDEsMjg5LjE0OUM1NDcuMzgsMjg0LjQ5Nyw1NzAuNTI2LDI3NS4xOTQsNTgyLjA5OSwyNzAuNTQzTDU5My42NzIsMjY1Ljg5MiIgaWQ9Im15LXN2Zy1MX0lBTV9DUF8wIiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIiBzdHlsZT0iOyIgZGF0YS1lZGdlPSJ0cnVlIiBkYXRhLWV0PSJlZGdlIiBkYXRhLWlkPSJMX0lBTV9DUF8wIiBkYXRhLXBvaW50cz0iVzNzaWVDSTZORGs1TGpJek5ETTNOU3dpZVNJNk1qa3pMamM1T1RrNU56TXlPVGN4TVRsOUxIc2llQ0k2TlRJMExqSXpORE0zTlN3aWVTSTZNamt6TGpjNU9UazVOek15T1RjeE1UbDlMSHNpZUNJNk5UazNMak00TXprek1qSXpPRFExTWpVc0lua2lPakkyTkM0ek9UazVPVGMzTVRFeE9ERTJOSDFkIiBkYXRhLWxvb2s9ImNsYXNzaWMiIG1hcmtlci1lbmQ9InVybCgjbXktc3ZnX2Zsb3djaGFydC12Mi1wb2ludEVuZCkiLz48cGF0aCBkPSJNNjc4LjA1NiwyMTQuNEw2OTcuNTM3LDE4OC4wMzNDNzE3LjAxNywxNjEuNjY3LDc1NS45NzcsMTA4LjkzMyw3OTguMTU0LDgyLjU2N0M4NDAuMzMxLDU2LjIsODg1LjcyNCw1Ni4yLDkzMS4xMTcsNTYuMkM5NzYuNTEsNTYuMiwxMDIxLjkwNCw1Ni4yLDEwNDkuMDY1LDU2LjJDMTA3Ni4yMjcsNTYuMiwxMDg1LjE1Niw1Ni4yLDEwODkuNjIxLDU2LjJMMTA5NC4wODYsNTYuMiIgaWQ9Im15LXN2Zy1MX0NQX1BXXzAiIGNsYXNzPSJlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGVkZ2UtdGhpY2tuZXNzLW5vcm1hbCBlZGdlLXBhdHRlcm4tc29saWQgZmxvd2NoYXJ0LWxpbmsiIHN0eWxlPSI7IiBkYXRhLWVkZ2U9InRydWUiIGRhdGEtZXQ9ImVkZ2UiIGRhdGEtaWQ9IkxfQ1BfUFdfMCIgZGF0YS1wb2ludHM9Ilczc2llQ0k2TmpjNExqQTFOalF3TVRrek1ETXpOeklzSW5raU9qSXhOQzR6T1RrNU9UYzNNVEV4T0RFMk5IMHNleUo0SWpvM09UUXVPVE0zTlN3aWVTSTZOVFl1TVRrNU9UazRPRFUxTlRrd09ESjlMSHNpZUNJNk9UTXhMakV4TnpFNE56VXNJbmtpT2pVMkxqRTVPVGs1T0RnMU5UVTVNRGd5ZlN4N0luZ2lPakV3TmpjdU1qazJPRGMxTENKNUlqbzFOaTR4T1RrNU9UZzROVFUxT1RBNE1uMHNleUo0SWpveE1EazRMakE0TlRrek56VXNJbmtpT2pVMkxqRTVPVGs1T0RnMU5UVTVNRGd5ZlYwPSIgZGF0YS1sb29rPSJjbGFzc2ljIiBtYXJrZXItZW5kPSJ1cmwoI215LXN2Z19mbG93Y2hhcnQtdjItcG9pbnRFbmQpIi8+PHBhdGggZD0iTTEyOTIuMTY0LDQ1LjI2OEwxMjk3LjI5Niw0NC42OUMxMzAyLjQyNyw0NC4xMTIsMTMxMi42OSw0Mi45NTYsMTMyMS4zNTcsNDIuMzc4QzEzMzAuMDIzLDQxLjgsMTMzNy4wOTQsNDEuOCwxMzQwLjYyOSw0MS44TDEzNDQuMTY0LDQxLjgiIGlkPSJteS1zdmctTF9QV19QQV8wIiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIiBzdHlsZT0iOyIgZGF0YS1lZGdlPSJ0cnVlIiBkYXRhLWV0PSJlZGdlIiBkYXRhLWlkPSJMX1BXX1BBXzAiIGRhdGEtcG9pbnRzPSJXM3NpZUNJNk1USTVNaTR4TmpRd05qSTFMQ0o1SWpvME5TNHlOamcwTWpVNU9EYzROakk0T0RSOUxIc2llQ0k2TVRNeU1pNDVOVE14TWpVc0lua2lPalF4TGpjNU9UazVPVEl6TnpBMk1EVTFmU3g3SW5naU9qRXpORGd1TVRZME1EWXlOU3dpZVNJNk5ERXVOems1T1RrNU1qTTNNRFl3TlRWOVhRPT0iIGRhdGEtbG9vaz0iY2xhc3NpYyIgbWFya2VyLWVuZD0idXJsKCNteS1zdmdfZmxvd2NoYXJ0LXYyLXBvaW50RW5kKSIvPjxwYXRoIGQ9Ik02ODAuMzIsMjY0LjRMNjk5LjQyMywyODcuNDMzQzcxOC41MjYsMzEwLjQ2Nyw3NTYuNzMyLDM1Ni41MzMsNzc5LjMzNSwzNzkuNTY3QzgwMS45MzgsNDAyLjYsODA4LjkzOCw0MDIuNiw4MTIuNDM4LDQwMi42TDgxNS45MzgsNDAyLjYiIGlkPSJteS1zdmctTF9DUF9DRF8wIiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIiBzdHlsZT0iOyIgZGF0YS1lZGdlPSJ0cnVlIiBkYXRhLWV0PSJlZGdlIiBkYXRhLWlkPSJMX0NQX0NEXzAiIGRhdGEtcG9pbnRzPSJXM3NpZUNJNk5qZ3dMak14T1Rrek9USTFNemcwT1RJc0lua2lPakkyTkM0ek9UazVPVGMzTVRFeE9ERTJOSDBzZXlKNElqbzNPVFF1T1RNM05Td2llU0k2TkRBeUxqVTVPVGs1TmpVMk5qYzNNalEyZlN4N0luZ2lPamd4T1M0NU16YzFMQ0o1SWpvME1ESXVOVGs1T1RrMk5UWTJOemN5TkRaOVhRPT0iIGRhdGEtbG9vaz0iY2xhc3NpYyIgbWFya2VyLWVuZD0idXJsKCNteS1zdmdfZmxvd2NoYXJ0LXYyLXBvaW50RW5kKSIvPjxwYXRoIGQ9Ik05NTguNDg0LDM3Ny42TDk3Ni42MiwzNjEuMDMzQzk5NC43NTUsMzQ0LjQ2NywxMDMxLjAyNiwzMTEuMzMzLDEwNTIuNjYxLDI5NC43NjdDMTA3NC4yOTcsMjc4LjIsMTA4MS4yOTcsMjc4LjIsMTA4NC43OTcsMjc4LjJMMTA4OC4yOTcsMjc4LjIiIGlkPSJteS1zdmctTF9DRF9DUl8wIiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIiBzdHlsZT0iOyIgZGF0YS1lZGdlPSJ0cnVlIiBkYXRhLWV0PSJlZGdlIiBkYXRhLWlkPSJMX0NEX0NSXzAiIGRhdGEtcG9pbnRzPSJXM3NpZUNJNk9UVTRMalE0TkRRNE9ERXlOalV5TlRjc0lua2lPak0zTnk0MU9UazVPVFkxTmpZM056STBObjBzZXlKNElqb3hNRFkzTGpJNU5qZzNOU3dpZVNJNk1qYzRMakU1T1RrNU5qazBPREkwTWpKOUxIc2llQ0k2TVRBNU1pNHlPVFk0TnpVc0lua2lPakkzT0M0eE9UazVPVFk1TkRneU5ESXlmVjA9IiBkYXRhLWxvb2s9ImNsYXNzaWMiIG1hcmtlci1lbmQ9InVybCgjbXktc3ZnX2Zsb3djaGFydC12Mi1wb2ludEVuZCkiLz48cGF0aCBkPSJNMTI1Ny45MjQsMjQ0LjRMMTI2OC43NjIsMjM4LjU2N0MxMjc5LjYwMSwyMzIuNzMzLDEzMDEuMjc3LDIyMS4wNjcsMTMyMi41OTUsMjEwLjYwM0MxMzQzLjkxNCwyMDAuMTM5LDEzNjQuODc1LDE5MC44NzgsMTM3NS4zNTYsMTg2LjI0N0wxMzg1LjgzNiwxODEuNjE3IiBpZD0ibXktc3ZnLUxfQ1JfQ0FfMCIgY2xhc3M9ImVkZ2UtdGhpY2tuZXNzLW5vcm1hbCBlZGdlLXBhdHRlcm4tc29saWQgZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBmbG93Y2hhcnQtbGluayIgc3R5bGU9IjsiIGRhdGEtZWRnZT0idHJ1ZSIgZGF0YS1ldD0iZWRnZSIgZGF0YS1pZD0iTF9DUl9DQV8wIiBkYXRhLXBvaW50cz0iVzNzaWVDSTZNVEkxTnk0NU1qUXlPREUyTVRnNU9UWXNJbmtpT2pJME5DNHpPVGs1T1RjM01URXhPREUyTkgwc2V5SjRJam94TXpJeUxqazFNekV5TlN3aWVTSTZNakE1TGpNNU9UazVOemN4TVRFNE1UWTBmU3g3SW5naU9qRXpPRGt1TkRrME9UUTBORFUyTVRZeU15d2llU0k2TVRjNUxqazVPVGs1T0RBNU1qWTFNVE0zZlYwPSIgZGF0YS1sb29rPSJjbGFzc2ljIiBtYXJrZXItZW5kPSJ1cmwoI215LXN2Z19mbG93Y2hhcnQtdjItcG9pbnRFbmQpIi8+PHBhdGggZD0iTTEwMzMuOTYzLDQyOC41OEwxMDM5LjUxOSw0MjkuOTgzQzEwNDUuMDc0LDQzMS4zODYsMTA1Ni4xODYsNDM0LjE5MywxMDgzLjA0Niw0MzUuNTk3QzExMDkuOTA2LDQzNywxMTUyLjUxNiw0MzcsMTE5NS4xMjUsNDM3QzEyMzcuNzM0LDQzNywxMjgwLjM0NCw0MzcsMTMyMi4xNjksNDM3QzEzNjMuOTk1LDQzNywxNDA1LjAzNiw0MzcsMTQ0Ni4wNzgsNDM3QzE0ODcuMTIsNDM3LDE1MjguMTYxLDQzNywxNTUyLjE5NSw0MzYuMzA1QzE1NzYuMjI4LDQzNS42MSwxNTgzLjI1NCw0MzQuMjE5LDE1ODYuNzY3LDQzMy41MjRMMTU5MC4yNzksNDMyLjgyOSIgaWQ9Im15LXN2Zy1MX0NEX0NTXzAiIGNsYXNzPSJlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGVkZ2UtdGhpY2tuZXNzLW5vcm1hbCBlZGdlLXBhdHRlcm4tc29saWQgZmxvd2NoYXJ0LWxpbmsiIHN0eWxlPSI7IiBkYXRhLWVkZ2U9InRydWUiIGRhdGEtZXQ9ImVkZ2UiIGRhdGEtaWQ9IkxfQ0RfQ1NfMCIgZGF0YS1wb2ludHM9Ilczc2llQ0k2TVRBek1DNHdPRFE1T0RRM05EVTNNek1zSW5raU9qUXlOeTQxT1RrNU9UWTFOalkzTnpJME5uMHNleUo0SWpveE1EWTNMakk1TmpnM05Td2llU0k2TkRNMkxqazVPVGs1TmpFNE5UTXdNamN6ZlN4N0luZ2lPakV4T1RVdU1USTFMQ0o1SWpvME16WXVPVGs1T1RrMk1UZzFNekF5TnpOOUxIc2llQ0k2TVRNeU1pNDVOVE14TWpVc0lua2lPalF6Tmk0NU9UazVPVFl4T0RVek1ESTNNMzBzZXlKNElqb3hORFEyTGpBM09ERXlOU3dpZVNJNk5ETTJMams1T1RrNU5qRTROVE13TWpjemZTeDdJbmdpT2pFMU5qa3VNakF6TVRJMUxDSjVJam8wTXpZdU9UazVPVGsyTVRnMU16QXlOek45TEhzaWVDSTZNVFU1TkM0eU1ETXhNalVzSW5raU9qUXpNaTR3TlRJek1EYzJPRE0xTWpRMk5YMWQiIGRhdGEtbG9vaz0iY2xhc3NpYyIgbWFya2VyLXN0YXJ0PSJ1cmwoI215LXN2Z19mbG93Y2hhcnQtdjItcG9pbnRTdGFydCkiIG1hcmtlci1lbmQ9InVybCgjbXktc3ZnX2Zsb3djaGFydC12Mi1wb2ludEVuZCkiLz48cGF0aCBkPSJNMTI5Ny45NTMsMjk0LjI4OEwxMzAyLjEyLDI5NC45NEMxMzA2LjI4NiwyOTUuNTkyLDEzMTQuNjIsMjk2Ljg5NiwxMzMxLjg0MSwzMDUuNDM3QzEzNDkuMDYzLDMxMy45NzcsMTM3NS4xNzIsMzI5Ljc1NCwxMzg4LjIyNywzMzcuNjQzTDE0MDEuMjgyLDM0NS41MzEiIGlkPSJteS1zdmctTF9DUl9BR18wIiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIiBzdHlsZT0iOyIgZGF0YS1lZGdlPSJ0cnVlIiBkYXRhLWV0PSJlZGdlIiBkYXRhLWlkPSJMX0NSX0FHXzAiIGRhdGEtcG9pbnRzPSJXM3NpZUNJNk1USTVOeTQ1TlRNeE1qVXNJbmtpT2pJNU5DNHlPRGcwT1RRMk9EWTVNRFE1ZlN4N0luZ2lPakV6TWpJdU9UVXpNVEkxTENKNUlqb3lPVGd1TVRrNU9UazJPVFE0TWpReU1uMHNleUo0SWpveE5EQTBMamN3TlRRM05qa3pPRFF3T0RVc0lua2lPak0wTnk0MU9UazVPVFkxTmpZM056STBObjFkIiBkYXRhLWxvb2s9ImNsYXNzaWMiIG1hcmtlci1lbmQ9InVybCgjbXktc3ZnX2Zsb3djaGFydC12Mi1wb2ludEVuZCkiLz48cGF0aCBkPSJNMTU0NC44NjcsMzcyLjZMMTU0OC45MjMsMzcyLjZDMTU1Mi45NzksMzcyLjYsMTU2MS4wOTEsMzcyLjYsMTU2OC42NjQsMzczLjM5OEMxNTc2LjIzNiwzNzQuMTk2LDE1ODMuMjY5LDM3NS43OTIsMTU4Ni43ODYsMzc2LjU5TDE1OTAuMzAyLDM3Ny4zODgiIGlkPSJteS1zdmctTF9BR19DU18wIiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIiBzdHlsZT0iOyIgZGF0YS1lZGdlPSJ0cnVlIiBkYXRhLWV0PSJlZGdlIiBkYXRhLWlkPSJMX0FHX0NTXzAiIGRhdGEtcG9pbnRzPSJXM3NpZUNJNk1UVTBNQzQ0TmpjeE9EYzFMQ0o1SWpvek56SXVOVGs1T1RrMk5UWTJOemN5TkRaOUxIc2llQ0k2TVRVMk9TNHlNRE14TWpVc0lua2lPak0zTWk0MU9UazVPVFkxTmpZM056STBObjBzZXlKNElqb3hOVGswTGpJd016RXlOU3dpZVNJNk16YzRMakkzTXpNME5UazROVGc1T0RJemZWMD0iIGRhdGEtbG9vaz0iY2xhc3NpYyIgbWFya2VyLXN0YXJ0PSJ1cmwoI215LXN2Z19mbG93Y2hhcnQtdjItcG9pbnRTdGFydCkiIG1hcmtlci1lbmQ9InVybCgjbXktc3ZnX2Zsb3djaGFydC12Mi1wb2ludEVuZCkiLz48cGF0aCBkPSJNMTIyNy41NjIsOTBMMTI0My40NiwxMDYuNTY3QzEyNTkuMzU5LDEyMy4xMzMsMTI5MS4xNTYsMTU2LjI2NywxMzE3LjY4MiwxNzkuMjU1QzEzNDQuMjA4LDIwMi4yNDQsMTM2NS40NjQsMjE1LjA4OCwxMzc2LjA5MSwyMjEuNTA5TDEzODYuNzE5LDIyNy45MzEiIGlkPSJteS1zdmctTF9QV19HSF8wIiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIiBzdHlsZT0iOyIgZGF0YS1lZGdlPSJ0cnVlIiBkYXRhLWV0PSJlZGdlIiBkYXRhLWlkPSJMX1BXX0dIXzAiIGRhdGEtcG9pbnRzPSJXM3NpZUNJNk1USXlOeTQxTmpFNE5qWXhNREExTnpBeExDSjVJam80T1M0NU9UazVPVGd3T1RJMk5URXpOMzBzZXlKNElqb3hNekl5TGprMU16RXlOU3dpZVNJNk1UZzVMak01T1RrNU56Y3hNVEU0TVRZMGZTeDdJbmdpT2pFek9UQXVNVFF5TXpBMk1EZ3pNekl4TXl3aWVTSTZNakk1TGprNU9UazVPREE1TWpZMU1UTTNmVjA9IiBkYXRhLWxvb2s9ImNsYXNzaWMiIG1hcmtlci1lbmQ9InVybCgjbXktc3ZnX2Zsb3djaGFydC12Mi1wb2ludEVuZCkiLz48cGF0aCBkPSJNMTI5Ny45NTMsMzEwLjM3N0wxMzAyLjEyLDMxMS42ODFDMTMwNi4yODYsMzEyLjk4NSwxMzE0LjYyLDMxNS41OTIsMTMyNS45NDcsMzEzLjczMkMxMzM3LjI3NSwzMTEuODcyLDEzNTEuNTk3LDMwNS41NDQsMTM1OC43NTgsMzAyLjM4TDEzNjUuOTE5LDI5OS4yMTciIGlkPSJteS1zdmctTF9DUl9HSF8wIiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIiBzdHlsZT0iOyIgZGF0YS1lZGdlPSJ0cnVlIiBkYXRhLWV0PSJlZGdlIiBkYXRhLWlkPSJMX0NSX0dIXzAiIGRhdGEtcG9pbnRzPSJXM3NpZUNJNk1USTVOeTQ1TlRNeE1qVXNJbmtpT2pNeE1DNHpOelk1T1RJME1qVTFOamMzZlN4N0luZ2lPakV6TWpJdU9UVXpNVEkxTENKNUlqb3pNVGd1TVRrNU9UazJPVFE0TWpReU1uMHNleUo0SWpveE16WTVMalUzTnpZMk5qWXpNVFV4TXl3aWVTSTZNamszTGpVNU9UazVOalUyTmpjM01qUTJmVjA9IiBkYXRhLWxvb2s9ImNsYXNzaWMiIG1hcmtlci1lbmQ9InVybCgjbXktc3ZnX2Zsb3djaGFydC12Mi1wb2ludEVuZCkiLz48L2c+PGcgY2xhc3M9ImVkZ2VMYWJlbHMiPjxnIGNsYXNzPSJlZGdlTGFiZWwiPjxnIGNsYXNzPSJsYWJlbCIgZGF0YS1pZD0iTF9PX1JfMCIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgMCkiPjx0ZXh0IHk9Ii0xMC4xIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj48dHNwYW4gY2xhc3M9InRleHQtb3V0ZXItdHNwYW4gcm93IiB4PSIwIiB5PSItMC4xZW0iIGR5PSIxLjFlbSIgdGV4dC1hbmNob3I9Im1pZGRsZSIvPjwvdGV4dD48L2c+PC9nPjxnPjxyZWN0IGNsYXNzPSJiYWNrZ3JvdW5kIiBzdHlsZT0ic3Ryb2tlOiBub25lIi8+PC9nPjxnIGNsYXNzPSJlZGdlTGFiZWwiPjxnIGNsYXNzPSJsYWJlbCIgZGF0YS1pZD0iTF9SX0NQXzAiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIDApIj48dGV4dCB5PSItMTAuMSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+PHRzcGFuIGNsYXNzPSJ0ZXh0LW91dGVyLXRzcGFuIHJvdyIgeD0iMCIgeT0iLTAuMWVtIiBkeT0iMS4xZW0iIHRleHQtYW5jaG9yPSJtaWRkbGUiLz48L3RleHQ+PC9nPjwvZz48Zz48cmVjdCBjbGFzcz0iYmFja2dyb3VuZCIgc3R5bGU9InN0cm9rZTogbm9uZSIvPjwvZz48ZyBjbGFzcz0iZWRnZUxhYmVsIj48ZyBjbGFzcz0ibGFiZWwiIGRhdGEtaWQ9IkxfSUFNX0NQXzAiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIDApIj48dGV4dCB5PSItMTAuMSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+PHRzcGFuIGNsYXNzPSJ0ZXh0LW91dGVyLXRzcGFuIHJvdyIgeD0iMCIgeT0iLTAuMWVtIiBkeT0iMS4xZW0iIHRleHQtYW5jaG9yPSJtaWRkbGUiLz48L3RleHQ+PC9nPjwvZz48Zz48cmVjdCBjbGFzcz0iYmFja2dyb3VuZCIgc3R5bGU9InN0cm9rZTogbm9uZSIvPjwvZz48ZyBjbGFzcz0iZWRnZUxhYmVsIj48ZyBjbGFzcz0ibGFiZWwiIGRhdGEtaWQ9IkxfQ1BfUFdfMCIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgMCkiPjx0ZXh0IHk9Ii0xMC4xIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj48dHNwYW4gY2xhc3M9InRleHQtb3V0ZXItdHNwYW4gcm93IiB4PSIwIiB5PSItMC4xZW0iIGR5PSIxLjFlbSIgdGV4dC1hbmNob3I9Im1pZGRsZSIvPjwvdGV4dD48L2c+PC9nPjxnPjxyZWN0IGNsYXNzPSJiYWNrZ3JvdW5kIiBzdHlsZT0ic3Ryb2tlOiBub25lIi8+PC9nPjxnIGNsYXNzPSJlZGdlTGFiZWwiPjxnIGNsYXNzPSJsYWJlbCIgZGF0YS1pZD0iTF9QV19QQV8wIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAwKSI+PHRleHQgeT0iLTEwLjEiIHRleHQtYW5jaG9yPSJtaWRkbGUiPjx0c3BhbiBjbGFzcz0idGV4dC1vdXRlci10c3BhbiByb3ciIHg9IjAiIHk9Ii0wLjFlbSIgZHk9IjEuMWVtIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIi8+PC90ZXh0PjwvZz48L2c+PGc+PHJlY3QgY2xhc3M9ImJhY2tncm91bmQiIHN0eWxlPSJzdHJva2U6IG5vbmUiLz48L2c+PGcgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgY2xhc3M9ImxhYmVsIiBkYXRhLWlkPSJMX0NQX0NEXzAiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIDApIj48dGV4dCB5PSItMTAuMSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+PHRzcGFuIGNsYXNzPSJ0ZXh0LW91dGVyLXRzcGFuIHJvdyIgeD0iMCIgeT0iLTAuMWVtIiBkeT0iMS4xZW0iIHRleHQtYW5jaG9yPSJtaWRkbGUiLz48L3RleHQ+PC9nPjwvZz48Zz48cmVjdCBjbGFzcz0iYmFja2dyb3VuZCIgc3R5bGU9InN0cm9rZTogbm9uZSIvPjwvZz48ZyBjbGFzcz0iZWRnZUxhYmVsIj48ZyBjbGFzcz0ibGFiZWwiIGRhdGEtaWQ9IkxfQ0RfQ1JfMCIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgMCkiPjx0ZXh0IHk9Ii0xMC4xIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj48dHNwYW4gY2xhc3M9InRleHQtb3V0ZXItdHNwYW4gcm93IiB4PSIwIiB5PSItMC4xZW0iIGR5PSIxLjFlbSIgdGV4dC1hbmNob3I9Im1pZGRsZSIvPjwvdGV4dD48L2c+PC9nPjxnPjxyZWN0IGNsYXNzPSJiYWNrZ3JvdW5kIiBzdHlsZT0ic3Ryb2tlOiBub25lIi8+PC9nPjxnIGNsYXNzPSJlZGdlTGFiZWwiPjxnIGNsYXNzPSJsYWJlbCIgZGF0YS1pZD0iTF9DUl9DQV8wIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAwKSI+PHRleHQgeT0iLTEwLjEiIHRleHQtYW5jaG9yPSJtaWRkbGUiPjx0c3BhbiBjbGFzcz0idGV4dC1vdXRlci10c3BhbiByb3ciIHg9IjAiIHk9Ii0wLjFlbSIgZHk9IjEuMWVtIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIi8+PC90ZXh0PjwvZz48L2c+PGc+PHJlY3QgY2xhc3M9ImJhY2tncm91bmQiIHN0eWxlPSJzdHJva2U6IG5vbmUiLz48L2c+PGcgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgY2xhc3M9ImxhYmVsIiBkYXRhLWlkPSJMX0NEX0NTXzAiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIDApIj48dGV4dCB5PSItMTAuMSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+PHRzcGFuIGNsYXNzPSJ0ZXh0LW91dGVyLXRzcGFuIHJvdyIgeD0iMCIgeT0iLTAuMWVtIiBkeT0iMS4xZW0iIHRleHQtYW5jaG9yPSJtaWRkbGUiLz48L3RleHQ+PC9nPjwvZz48Zz48cmVjdCBjbGFzcz0iYmFja2dyb3VuZCIgc3R5bGU9InN0cm9rZTogbm9uZSIvPjwvZz48ZyBjbGFzcz0iZWRnZUxhYmVsIj48ZyBjbGFzcz0ibGFiZWwiIGRhdGEtaWQ9IkxfQ1JfQUdfMCIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgMCkiPjx0ZXh0IHk9Ii0xMC4xIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj48dHNwYW4gY2xhc3M9InRleHQtb3V0ZXItdHNwYW4gcm93IiB4PSIwIiB5PSItMC4xZW0iIGR5PSIxLjFlbSIgdGV4dC1hbmNob3I9Im1pZGRsZSIvPjwvdGV4dD48L2c+PC9nPjxnPjxyZWN0IGNsYXNzPSJiYWNrZ3JvdW5kIiBzdHlsZT0ic3Ryb2tlOiBub25lIi8+PC9nPjxnIGNsYXNzPSJlZGdlTGFiZWwiPjxnIGNsYXNzPSJsYWJlbCIgZGF0YS1pZD0iTF9BR19DU18wIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAwKSI+PHRleHQgeT0iLTEwLjEiIHRleHQtYW5jaG9yPSJtaWRkbGUiPjx0c3BhbiBjbGFzcz0idGV4dC1vdXRlci10c3BhbiByb3ciIHg9IjAiIHk9Ii0wLjFlbSIgZHk9IjEuMWVtIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIi8+PC90ZXh0PjwvZz48L2c+PGc+PHJlY3QgY2xhc3M9ImJhY2tncm91bmQiIHN0eWxlPSJzdHJva2U6IG5vbmUiLz48L2c+PGcgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgY2xhc3M9ImxhYmVsIiBkYXRhLWlkPSJMX1BXX0dIXzAiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIDApIj48dGV4dCB5PSItMTAuMSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+PHRzcGFuIGNsYXNzPSJ0ZXh0LW91dGVyLXRzcGFuIHJvdyIgeD0iMCIgeT0iLTAuMWVtIiBkeT0iMS4xZW0iIHRleHQtYW5jaG9yPSJtaWRkbGUiLz48L3RleHQ+PC9nPjwvZz48Zz48cmVjdCBjbGFzcz0iYmFja2dyb3VuZCIgc3R5bGU9InN0cm9rZTogbm9uZSIvPjwvZz48ZyBjbGFzcz0iZWRnZUxhYmVsIj48ZyBjbGFzcz0ibGFiZWwiIGRhdGEtaWQ9IkxfQ1JfR0hfMCIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgMCkiPjx0ZXh0IHk9Ii0xMC4xIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj48dHNwYW4gY2xhc3M9InRleHQtb3V0ZXItdHNwYW4gcm93IiB4PSIwIiB5PSItMC4xZW0iIGR5PSIxLjFlbSIgdGV4dC1hbmNob3I9Im1pZGRsZSIvPjwvdGV4dD48L2c+PC9nPjxnPjxyZWN0IGNsYXNzPSJiYWNrZ3JvdW5kIiBzdHlsZT0ic3Ryb2tlOiBub25lIi8+PC9nPjwvZz48ZyBjbGFzcz0ibm9kZXMiPjxnIGNsYXNzPSJub2RlIGRlZmF1bHQiIGlkPSJteS1zdmctZmxvd2NoYXJ0LU8tMCIgZGF0YS1sb29rPSJjbGFzc2ljIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxMjEuOTUzMTI1LCAxODQuOTk5OTk4MDkyNjUxMzcpIj48cmVjdCBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIiBzdHlsZT0iIiB4PSItMTEzLjk1MzEyNSIgeT0iLTMzLjc5OTk5OTIzNzA2MDU1IiB3aWR0aD0iMjI3LjkwNjI1IiBoZWlnaHQ9IjY3LjU5OTk5ODQ3NDEyMTEiLz48ZyBjbGFzcz0ibGFiZWwiIHN0eWxlPSIiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIC0xOC43OTk5OTkyMzcwNjA1NDcpIj48cmVjdC8+PGc+PHJlY3QgY2xhc3M9ImJhY2tncm91bmQiIHN0eWxlPSJzdHJva2U6IG5vbmUiLz48dGV4dCB5PSItMTAuMSIgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJ0ZXh0LW91dGVyLXRzcGFuIHJvdyIgeD0iMCIgeT0iLTAuMWVtIiBkeT0iMS4xZW0iPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj5PcGVyYXRvcjwvdHNwYW4+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPiB0aHJvdWdoPC90c3Bhbj48dHNwYW4gZm9udC1zdHlsZT0ibm9ybWFsIiBjbGFzcz0idGV4dC1pbm5lci10c3BhbiIgZm9udC13ZWlnaHQ9Im5vcm1hbCI+IFNTSDwvdHNwYW4+PC90c3Bhbj48dHNwYW4gY2xhc3M9InRleHQtb3V0ZXItdHNwYW4gcm93IiB4PSIwIiB5PSIxZW0iIGR5PSIxLjFlbSI+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPnR1bm5lbDwvdHNwYW4+PC90c3Bhbj48L3RleHQ+PC9nPjwvZz48L2c+PGcgY2xhc3M9Im5vZGUgZGVmYXVsdCIgaWQ9Im15LXN2Zy1mbG93Y2hhcnQtUi0xIiBkYXRhLWxvb2s9ImNsYXNzaWMiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDM5Mi41NzAzMTI1LCAxODQuOTk5OTk4MDkyNjUxMzcpIj48cmVjdCBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIiBzdHlsZT0iIiB4PSItOTYuNTkzNzUiIHk9Ii0yNSIgd2lkdGg9IjE5My4xODc1IiBoZWlnaHQ9IjUwIi8+PGcgY2xhc3M9ImxhYmVsIiBzdHlsZT0iIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtMTApIj48cmVjdC8+PGc+PHJlY3QgY2xhc3M9ImJhY2tncm91bmQiIHN0eWxlPSJzdHJva2U6IG5vbmUiLz48dGV4dCB5PSItMTAuMSIgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJ0ZXh0LW91dGVyLXRzcGFuIHJvdyIgeD0iMCIgeT0iLTAuMWVtIiBkeT0iMS4xZW0iPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj5UYXNrczwvdHNwYW4+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPiBhbmQ8L3RzcGFuPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj4gUnVuczwvdHNwYW4+PC90c3Bhbj48L3RleHQ+PC9nPjwvZz48L2c+PGcgY2xhc3M9Im5vZGUgZGVmYXVsdCIgaWQ9Im15LXN2Zy1mbG93Y2hhcnQtQ1AtMyIgZGF0YS1sb29rPSJjbGFzc2ljIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSg2NTkuNTg1OTM3NSwgMjM5LjM5OTk5NzcxMTE4MTY0KSI+PHJlY3QgY2xhc3M9ImJhc2ljIGxhYmVsLWNvbnRhaW5lciIgc3R5bGU9IiIgeD0iLTExMC4zNTE1NjI1IiB5PSItMjUiIHdpZHRoPSIyMjAuNzAzMTI1IiBoZWlnaHQ9IjUwIi8+PGcgY2xhc3M9ImxhYmVsIiBzdHlsZT0iIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtMTApIj48cmVjdC8+PGc+PHJlY3QgY2xhc3M9ImJhY2tncm91bmQiIHN0eWxlPSJzdHJva2U6IG5vbmUiLz48dGV4dCB5PSItMTAuMSIgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJ0ZXh0LW91dGVyLXRzcGFuIHJvdyIgeD0iMCIgeT0iLTAuMWVtIiBkeT0iMS4xZW0iPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj5GYWN0b3J5PC90c3Bhbj48dHNwYW4gZm9udC1zdHlsZT0ibm9ybWFsIiBjbGFzcz0idGV4dC1pbm5lci10c3BhbiIgZm9udC13ZWlnaHQ9Im5vcm1hbCI+IGNvbnRyb2w8L3RzcGFuPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj4gcGxhbmU8L3RzcGFuPjwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PC9nPjxnIGNsYXNzPSJub2RlIGRlZmF1bHQiIGlkPSJteS1zdmctZmxvd2NoYXJ0LUlBTS00IiBkYXRhLWxvb2s9ImNsYXNzaWMiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDM5Mi41NzAzMTI1LCAyOTMuNzk5OTk3MzI5NzExOSkiPjxyZWN0IGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiIHN0eWxlPSIiIHg9Ii0xMDYuNjY0MDYyNSIgeT0iLTMzLjc5OTk5OTIzNzA2MDU1IiB3aWR0aD0iMjEzLjMyODEyNSIgaGVpZ2h0PSI2Ny41OTk5OTg0NzQxMjExIi8+PGcgY2xhc3M9ImxhYmVsIiBzdHlsZT0iIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtMTguNzk5OTk5MjM3MDYwNTQ3KSI+PHJlY3QvPjxnPjxyZWN0IGNsYXNzPSJiYWNrZ3JvdW5kIiBzdHlsZT0ic3Ryb2tlOiBub25lIi8+PHRleHQgeT0iLTEwLjEiIHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0idGV4dC1vdXRlci10c3BhbiByb3ciIHg9IjAiIHk9Ii0wLjFlbSIgZHk9IjEuMWVtIj48dHNwYW4gZm9udC1zdHlsZT0ibm9ybWFsIiBjbGFzcz0idGV4dC1pbm5lci10c3BhbiIgZm9udC13ZWlnaHQ9Im5vcm1hbCI+QXR0YWNoZWQ8L3RzcGFuPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj4gZGlzcGF0Y2hlcjwvdHNwYW4+PC90c3Bhbj48dHNwYW4gY2xhc3M9InRleHQtb3V0ZXItdHNwYW4gcm93IiB4PSIwIiB5PSIxZW0iIGR5PSIxLjFlbSI+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPmlkZW50aXR5PC90c3Bhbj48L3RzcGFuPjwvdGV4dD48L2c+PC9nPjwvZz48ZyBjbGFzcz0ibm9kZSBkZWZhdWx0IiBpZD0ibXktc3ZnLWZsb3djaGFydC1QVy03IiBkYXRhLWxvb2s9ImNsYXNzaWMiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDExOTUuMTI1LCA1Ni4xOTk5OTg4NTU1OTA4MikiPjxyZWN0IGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiIHN0eWxlPSIiIHg9Ii05Ny4wMzkwNjI1IiB5PSItMzMuNzk5OTk5MjM3MDYwNTUiIHdpZHRoPSIxOTQuMDc4MTI1IiBoZWlnaHQ9IjY3LjU5OTk5ODQ3NDEyMTEiLz48ZyBjbGFzcz0ibGFiZWwiIHN0eWxlPSIiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIC0xOC43OTk5OTkyMzcwNjA1NDcpIj48cmVjdC8+PGc+PHJlY3QgY2xhc3M9ImJhY2tncm91bmQiIHN0eWxlPSJzdHJva2U6IG5vbmUiLz48dGV4dCB5PSItMTAuMSIgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJ0ZXh0LW91dGVyLXRzcGFuIHJvdyIgeD0iMCIgeT0iLTAuMWVtIiBkeT0iMS4xZW0iPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj5QZXJzaXN0ZW50PC90c3Bhbj48dHNwYW4gZm9udC1zdHlsZT0ibm9ybWFsIiBjbGFzcz0idGV4dC1pbm5lci10c3BhbiIgZm9udC13ZWlnaHQ9Im5vcm1hbCI+IFdvcmtlcjwvdHNwYW4+PC90c3Bhbj48dHNwYW4gY2xhc3M9InRleHQtb3V0ZXItdHNwYW4gcm93IiB4PSIwIiB5PSIxZW0iIGR5PSIxLjFlbSI+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPmJhY2tlbmQ8L3RzcGFuPjwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PC9nPjxnIGNsYXNzPSJub2RlIGRlZmF1bHQiIGlkPSJteS1zdmctZmxvd2NoYXJ0LVBBLTkiIGRhdGEtbG9vaz0iY2xhc3NpYyIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTQ0Ni4wNzgxMjUsIDQxLjc5OTk5OTIzNzA2MDU1KSI+PHJlY3QgY2xhc3M9ImJhc2ljIGxhYmVsLWNvbnRhaW5lciIgc3R5bGU9IiIgeD0iLTk3LjkxNDA2MjUiIHk9Ii0zMy43OTk5OTkyMzcwNjA1NSIgd2lkdGg9IjE5NS44MjgxMjUiIGhlaWdodD0iNjcuNTk5OTk4NDc0MTIxMSIvPjxnIGNsYXNzPSJsYWJlbCIgc3R5bGU9IiIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgLTE4Ljc5OTk5OTIzNzA2MDU0NykiPjxyZWN0Lz48Zz48cmVjdCBjbGFzcz0iYmFja2dyb3VuZCIgc3R5bGU9InN0cm9rZTogbm9uZSIvPjx0ZXh0IHk9Ii0xMC4xIiBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InRleHQtb3V0ZXItdHNwYW4gcm93IiB4PSIwIiB5PSItMC4xZW0iIGR5PSIxLjFlbSI+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPlN1YnNjcmlwdGlvbjwvdHNwYW4+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPiBvcjwvdHNwYW4+PC90c3Bhbj48dHNwYW4gY2xhc3M9InRleHQtb3V0ZXItdHNwYW4gcm93IiB4PSIwIiB5PSIxZW0iIGR5PSIxLjFlbSI+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPkFQSS1iYWNrZWQ8L3RzcGFuPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj4gYWdlbnQ8L3RzcGFuPjwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PC9nPjxnIGNsYXNzPSJub2RlIGRlZmF1bHQiIGlkPSJteS1zdmctZmxvd2NoYXJ0LUNELTExIiBkYXRhLWxvb2s9ImNsYXNzaWMiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDkzMS4xMTcxODc1LCA0MDIuNTk5OTk2NTY2NzcyNDYpIj48cmVjdCBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIiBzdHlsZT0iIiB4PSItMTExLjE3OTY4NzUiIHk9Ii0yNSIgd2lkdGg9IjIyMi4zNTkzNzUiIGhlaWdodD0iNTAiLz48ZyBjbGFzcz0ibGFiZWwiIHN0eWxlPSIiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIC0xMCkiPjxyZWN0Lz48Zz48cmVjdCBjbGFzcz0iYmFja2dyb3VuZCIgc3R5bGU9InN0cm9rZTogbm9uZSIvPjx0ZXh0IHk9Ii0xMC4xIiBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InRleHQtb3V0ZXItdHNwYW4gcm93IiB4PSIwIiB5PSItMC4xZW0iIGR5PSIxLjFlbSI+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPkNsb3VkPC90c3Bhbj48dHNwYW4gZm9udC1zdHlsZT0ibm9ybWFsIiBjbGFzcz0idGV4dC1pbm5lci10c3BhbiIgZm9udC13ZWlnaHQ9Im5vcm1hbCI+IFJ1bjwvdHNwYW4+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPiBkaXNwYXRjaGVyPC90c3Bhbj48L3RzcGFuPjwvdGV4dD48L2c+PC9nPjwvZz48ZyBjbGFzcz0ibm9kZSBkZWZhdWx0IiBpZD0ibXktc3ZnLWZsb3djaGFydC1DUi0xMyIgZGF0YS1sb29rPSJjbGFzc2ljIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxMTk1LjEyNSwgMjc4LjE5OTk5Njk0ODI0MjIpIj48cmVjdCBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIiBzdHlsZT0iIiB4PSItMTAyLjgyODEyNSIgeT0iLTMzLjc5OTk5OTIzNzA2MDU1IiB3aWR0aD0iMjA1LjY1NjI1IiBoZWlnaHQ9IjY3LjU5OTk5ODQ3NDEyMTEiLz48ZyBjbGFzcz0ibGFiZWwiIHN0eWxlPSIiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIC0xOC43OTk5OTkyMzcwNjA1NDcpIj48cmVjdC8+PGc+PHJlY3QgY2xhc3M9ImJhY2tncm91bmQiIHN0eWxlPSJzdHJva2U6IG5vbmUiLz48dGV4dCB5PSItMTAuMSIgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJ0ZXh0LW91dGVyLXRzcGFuIHJvdyIgeD0iMCIgeT0iLTAuMWVtIiBkeT0iMS4xZW0iPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj5PbmU8L3RzcGFuPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj4gQ2xvdWQ8L3RzcGFuPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj4gUnVuPC90c3Bhbj48dHNwYW4gZm9udC1zdHlsZT0ibm9ybWFsIiBjbGFzcz0idGV4dC1pbm5lci10c3BhbiIgZm9udC13ZWlnaHQ9Im5vcm1hbCI+IEpvYjwvdHNwYW4+PC90c3Bhbj48dHNwYW4gY2xhc3M9InRleHQtb3V0ZXItdHNwYW4gcm93IiB4PSIwIiB5PSIxZW0iIGR5PSIxLjFlbSI+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPmV4ZWN1dGlvbjwvdHNwYW4+PC90c3Bhbj48L3RleHQ+PC9nPjwvZz48L2c+PGcgY2xhc3M9Im5vZGUgZGVmYXVsdCIgaWQ9Im15LXN2Zy1mbG93Y2hhcnQtQ0EtMTUiIGRhdGEtbG9vaz0iY2xhc3NpYyIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTQ0Ni4wNzgxMjUsIDE1NC45OTk5OTgwOTI2NTEzNykiPjxyZWN0IGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiIHN0eWxlPSIiIHg9Ii05Ny45MTQwNjI1IiB5PSItMjUiIHdpZHRoPSIxOTUuODI4MTI1IiBoZWlnaHQ9IjUwIi8+PGcgY2xhc3M9ImxhYmVsIiBzdHlsZT0iIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtMTApIj48cmVjdC8+PGc+PHJlY3QgY2xhc3M9ImJhY2tncm91bmQiIHN0eWxlPSJzdHJva2U6IG5vbmUiLz48dGV4dCB5PSItMTAuMSIgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJ0ZXh0LW91dGVyLXRzcGFuIHJvdyIgeD0iMCIgeT0iLTAuMWVtIiBkeT0iMS4xZW0iPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj5BUEktYmFja2VkPC90c3Bhbj48dHNwYW4gZm9udC1zdHlsZT0ibm9ybWFsIiBjbGFzcz0idGV4dC1pbm5lci10c3BhbiIgZm9udC13ZWlnaHQ9Im5vcm1hbCI+IGFnZW50PC90c3Bhbj48L3RzcGFuPjwvdGV4dD48L2c+PC9nPjwvZz48ZyBjbGFzcz0ibm9kZSBkZWZhdWx0IiBpZD0ibXktc3ZnLWZsb3djaGFydC1DUy0xNyIgZGF0YS1sb29rPSJjbGFzc2ljIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxNzIwLjc4OTA2MjUsIDQwNi45OTk5OTYxODUzMDI3MykiPjxyZWN0IGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiIHN0eWxlPSIiIHg9Ii0xMjYuNTg1OTM3NSIgeT0iLTMzLjc5OTk5OTIzNzA2MDU1IiB3aWR0aD0iMjUzLjE3MTg3NSIgaGVpZ2h0PSI2Ny41OTk5OTg0NzQxMjExIi8+PGcgY2xhc3M9ImxhYmVsIiBzdHlsZT0iIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtMTguNzk5OTk5MjM3MDYwNTQ3KSI+PHJlY3QvPjxnPjxyZWN0IGNsYXNzPSJiYWNrZ3JvdW5kIiBzdHlsZT0ic3Ryb2tlOiBub25lIi8+PHRleHQgeT0iLTEwLjEiIHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0idGV4dC1vdXRlci10c3BhbiByb3ciIHg9IjAiIHk9Ii0wLjFlbSIgZHk9IjEuMWVtIj48dHNwYW4gZm9udC1zdHlsZT0ibm9ybWFsIiBjbGFzcz0idGV4dC1pbm5lci10c3BhbiIgZm9udC13ZWlnaHQ9Im5vcm1hbCI+Q2xvdWQ8L3RzcGFuPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj4gY29udHJvbDwvdHNwYW4+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPiBhbmQ8L3RzcGFuPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj4gYXJ0aWZhY3Q8L3RzcGFuPjwvdHNwYW4+PHRzcGFuIGNsYXNzPSJ0ZXh0LW91dGVyLXRzcGFuIHJvdyIgeD0iMCIgeT0iMWVtIiBkeT0iMS4xZW0iPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj5zdG9yYWdlPC90c3Bhbj48L3RzcGFuPjwvdGV4dD48L2c+PC9nPjwvZz48ZyBjbGFzcz0ibm9kZSBkZWZhdWx0IiBpZD0ibXktc3ZnLWZsb3djaGFydC1BRy0xOSIgZGF0YS1sb29rPSJjbGFzc2ljIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxNDQ2LjA3ODEyNSwgMzcyLjU5OTk5NjU2Njc3MjQ2KSI+PHJlY3QgY2xhc3M9ImJhc2ljIGxhYmVsLWNvbnRhaW5lciIgc3R5bGU9IiIgeD0iLTk0Ljc4OTA2MjUiIHk9Ii0yNSIgd2lkdGg9IjE4OS41NzgxMjUiIGhlaWdodD0iNTAiLz48ZyBjbGFzcz0ibGFiZWwiIHN0eWxlPSIiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIC0xMCkiPjxyZWN0Lz48Zz48cmVjdCBjbGFzcz0iYmFja2dyb3VuZCIgc3R5bGU9InN0cm9rZTogbm9uZSIvPjx0ZXh0IHk9Ii0xMC4xIiBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InRleHQtb3V0ZXItdHNwYW4gcm93IiB4PSIwIiB5PSItMC4xZW0iIGR5PSIxLjFlbSI+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPkF0dGVtcHQ8L3RzcGFuPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj4gZ2F0ZXdheTwvdHNwYW4+PC90c3Bhbj48L3RleHQ+PC9nPjwvZz48L2c+PGcgY2xhc3M9Im5vZGUgZGVmYXVsdCIgaWQ9Im15LXN2Zy1mbG93Y2hhcnQtR0gtMjMiIGRhdGEtbG9vaz0iY2xhc3NpYyIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTQ0Ni4wNzgxMjUsIDI2My43OTk5OTczMjk3MTE5KSI+PHJlY3QgY2xhc3M9ImJhc2ljIGxhYmVsLWNvbnRhaW5lciIgc3R5bGU9IiIgeD0iLTk4LjEyNSIgeT0iLTMzLjc5OTk5OTIzNzA2MDU1IiB3aWR0aD0iMTk2LjI1IiBoZWlnaHQ9IjY3LjU5OTk5ODQ3NDEyMTEiLz48ZyBjbGFzcz0ibGFiZWwiIHN0eWxlPSIiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIC0xOC43OTk5OTkyMzcwNjA1NDcpIj48cmVjdC8+PGc+PHJlY3QgY2xhc3M9ImJhY2tncm91bmQiIHN0eWxlPSJzdHJva2U6IG5vbmUiLz48dGV4dCB5PSItMTAuMSIgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJ0ZXh0LW91dGVyLXRzcGFuIHJvdyIgeD0iMCIgeT0iLTAuMWVtIiBkeT0iMS4xZW0iPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj5HaXQ8L3RzcGFuPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj4gcmVwb3NpdG9yeTwvdHNwYW4+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPiBhbmQ8L3RzcGFuPjwvdHNwYW4+PHRzcGFuIGNsYXNzPSJ0ZXh0LW91dGVyLXRzcGFuIHJvdyIgeD0iMCIgeT0iMWVtIiBkeT0iMS4xZW0iPjx0c3BhbiBmb250LXN0eWxlPSJub3JtYWwiIGNsYXNzPSJ0ZXh0LWlubmVyLXRzcGFuIiBmb250LXdlaWdodD0ibm9ybWFsIj5leHRlcm5hbDwvdHNwYW4+PHRzcGFuIGZvbnQtc3R5bGU9Im5vcm1hbCIgY2xhc3M9InRleHQtaW5uZXItdHNwYW4iIGZvbnQtd2VpZ2h0PSJub3JtYWwiPiB0b29sczwvdHNwYW4+PC90c3Bhbj48L3RleHQ+PC9nPjwvZz48L2c+PC9nPjwvZz48L2c+PGRlZnM+PGZpbHRlciBpZD0ibXktc3ZnLWRyb3Atc2hhZG93IiBoZWlnaHQ9IjEzMCUiIHdpZHRoPSIxMzAlIj48ZmVEcm9wU2hhZG93IGR4PSI0IiBkeT0iNCIgc3RkRGV2aWF0aW9uPSIwIiBmbG9vZC1vcGFjaXR5PSIwLjA2IiBmbG9vZC1jb2xvcj0iIzAwMDAwMCIvPjwvZmlsdGVyPjwvZGVmcz48ZGVmcz48ZmlsdGVyIGlkPSJteS1zdmctZHJvcC1zaGFkb3ctc21hbGwiIGhlaWdodD0iMTUwJSIgd2lkdGg9IjE1MCUiPjxmZURyb3BTaGFkb3cgZHg9IjIiIGR5PSIyIiBzdGREZXZpYXRpb249IjAiIGZsb29kLW9wYWNpdHk9IjAuMDYiIGZsb29kLWNvbG9yPSIjMDAwMDAwIi8+PC9maWx0ZXI+PC9kZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0ibXktc3ZnLWdyYWRpZW50IiBncmFkaWVudFVuaXRzPSJvYmplY3RCb3VuZGluZ0JveCIgeDE9IjAlIiB5MT0iMCUiIHgyPSIxMDAlIiB5Mj0iMCUiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiM2MDc5OGEiIHN0b3Atb3BhY2l0eT0iMSIvPjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iaHNsKDIwMi41LCAwJSwgODQuNTA5ODAzOTIxNiUpIiBzdG9wLW9wYWNpdHk9IjEiLz48L2xpbmVhckdyYWRpZW50Pjwvc3ZnPg=="><figcaption>Diagram 1</figcaption><details><summary>View Mermaid source</summary><pre><code class="language-mermaid">flowchart LR
+    O[&quot;Operator through SSH tunnel&quot;] --&gt; R[&quot;Task and Run&quot;]
+    R --&gt; CP[&quot;Factory control plane&quot;]
+    IAM[&quot;Attached dispatcher identity&quot;] --&gt; CP
+    CP --&gt; PW[&quot;Persistent Worker backend&quot;]
+    PW --&gt; PA[&quot;Subscription or API-backed agent&quot;]
+    CP --&gt; CD[&quot;Cloud Run dispatcher&quot;]
+    CD --&gt; CR[&quot;One Cloud Run Job execution&quot;]
+    CR --&gt; CA[&quot;API-backed agent&quot;]
+    CD &lt;--&gt; CS[&quot;Cloud control and artifact storage&quot;]
+    CR --&gt; AG[&quot;Attempt gateway&quot;]
+    AG &lt;--&gt; CS
+    PW --&gt; GH[&quot;Git repository and external tools&quot;]
+    CR --&gt; GH</code></pre></details></figure>
+<div class="source-block" data-source-block="15"
+data-source-sha256="27285ae5caefab7a42ab7abaf9ca195911f62f9c2141dc92656c63d7f38c58f0">
+<p>Factory owns Tasks, Runs, Sessions, and Attempt identity, the frozen prompt and commit, scheduling, capacity, retries, cancellation, events,
+results, cost history, and terminal outcomes. The persistent Worker owns
+its cache, worktrees, agent processes, and local cleanup. The Cloud Run
+adapter owns cloud dispatch, execution reconciliation, authority
+publication, cancellation, and artifact transport. Cloud Run owns
+disposable compute only.</p>
+</div>
+<div class="source-block" data-source-block="16"
+data-source-sha256="b194f3ea8dd335c8f0c3b996b936895763460979ac41834d9fc84ae34547ac0c">
+<p>Backend, runtime, and model are independent choices:</p>
+</div>
+<div class="source-block table-wrap" data-source-block="17"
+data-source-sha256="448f5c52ccf62eda90199725d622f6572425fc3e107667af24f236dde09c4396">
+<table>
+<thead>
+<tr>
+<th>Choice</th>
+<th>Examples</th>
+<th>Owner</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Execution backend</td>
+<td>Persistent Worker, Cloud Run Job</td>
+<td>Factory routing</td>
+</tr>
+<tr>
+<td>Agent runtime</td>
+<td>Pi, Codex, Claude Code</td>
+<td>Backend capability</td>
+</tr>
+<tr>
+<td>Provider and model</td>
+<td>Subscription session, OpenRouter and DeepSeek</td>
+<td>Execution profile</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="source-block" data-source-block="18"
+data-source-sha256="c604c2430418d950d2c3be6d383cc2b1cd240d7fed7f0a2dc1e77000d93fcea5">
+<p>DeepSeek V4 Flash is one tested model, not a Cloud Run backend
+type.</p>
+</div>
+<div class="source-block" data-source-block="19"
+data-source-sha256="48e89ad2ee55b8112c7ac71dbd56d92e13d13ee6aa0cb9bb8b849ef6b93c35a8">
+<p>In the first hosted shape, the control plane and SQLite database run
+on a dedicated Compute Engine VM with persistent disk. The operator
+reaches its loopback listener through an SSH tunnel. Persistent Workers
+run on separate local or VM hosts and keep their existing outbound
+authenticated connection to Factory. This preserves the current
+architecture while preventing an agent process from using the dispatcher
+VM's attached Google identity.</p>
+</div>
+</div>
+<div class="document-section">
+<section id="4-proposed-design" class="source-block"
+data-source-block="20"
+data-source-sha256="cb43280d884b7bd10ddfe1c903a3a3ffc221ebb65bc3295cbb6d512812e2ddb1">
+<h2>4. Proposed design</h2>
+</section>
+<section id="how-it-works" class="source-block" data-source-block="21"
+data-source-sha256="e248d7da23aef6704ac43f3f639e0b91f6c326e9ecb982e008905e4785a6b4ed">
+<h3>How it works</h3>
+</section>
+<div class="source-block" data-source-block="22"
+data-source-sha256="7347938118b0c28cf1ea802becf0bf17737fed3376d21ea97aa39de0c651b554">
+<p>An operator runs a Task against one repository and supplies the
+configured <code>Cloud Run Europe</code> profile as a manual run
+override. Factory creates ordinary Run and Session records. A cloud
+repository input resolver turns the configured source ref into a full
+Git commit SHA before the Session queues. Factory freezes that commit,
+the complete prompt, runtime, provider and model selection, repository
+identity, and execution-profile version on the cloud Session. Every cloud
+Attempt and explicit retry for that Session reuses those inputs.</p>
+</div>
+<div class="source-block" data-source-block="23"
+data-source-sha256="95ba4635445a563c58683220cd986f8f454e1d91434c2a9cb39e36afba172201">
+<p>The embedded Cloud Run dispatcher creates an Attempt and a backend
+dispatch record in one transaction. The record contains a random
+non-secret run ID and starts in <code>dispatching</code>. Factory writes
+the immutable input and gateway registration, then asks the gateway to
+create the initial short-lived authority document using the gateway
+clock and an object-generation precondition. That response also fixes
+<code>session_started_at</code> to gateway server time and
+<code>session_deadline_at</code> to
+<code>session_started_at + timeout_seconds</code>; both are persisted in
+the dispatch before the Run call and bound into the authority object.
+Factory records local monotonic time immediately before that gateway
+request and anchors the returned remaining Session duration to the earlier instant. That conservative monotonic deadline drives the live dispatcher
+even if later gateway responses are delayed or unavailable. Factory
+calls one immutable, versioned Cloud Run Job resource with the Attempt
+ID, run ID, and a separate random 256-bit run capability as bounded
+overrides. The capability is sensitive, excluded from logs, and visible
+only to identities already allowed to inspect Cloud Run executions. The
+prompt, model credential, and any cloud credential are not override
+values.</p>
+</div>
+<div class="source-block" data-source-block="24"
+data-source-sha256="a733bfef79c4df0846a689570c21a0da0ccb6972683df1c18d79f2d01cfec758">
+<p>The Job service account has no access to the artifact bucket, Cloud
+Run administration, or sibling Attempts. Its only data permission is
+access to the dedicated, single-version model secret when the selected
+provider requires one. The wrapper requests an identity token for the
+Attempt gateway. Although code in the Job can ask the metadata server
+for another audience, the Job identity has no invoker grant on another
+Factory service. The gateway requires the exact gateway audience,
+expected service-account subject, and random run capability, maps them
+to one active Attempt prefix, and permits only the protocol operations
+and byte limits defined in this document. The gateway performs all
+Job-originated storage reads and conditional writes. This prevents one
+profile's execution from reading or corrupting a sibling execution. It
+does not prevent trusted repository code from tampering with its own
+Attempt, which is part of the initial trusted-repository boundary.</p>
+</div>
+<div class="source-block" data-source-block="25"
+data-source-sha256="858fc5f4f4291d97b4ab05881b9f1ffd371f98578333ebd63b1546bebae3cf63">
+<p>The Job wrapper starts a monotonic pre-fence timer when its process
+starts and sets it to the smaller of five minutes and the trusted remaining Session duration. It exits without an agent if that timer
+expires. It records local monotonic time immediately before requesting
+the Attempt and run-ID start fence. If a lost API response causes
+Factory to launch a duplicate, only one execution can win that fence;
+every duplicate exits without running an agent. The gateway serializes
+the fence and revocation through a conditional authority-object update,
+then publishes <code>started.json</code> as immutable evidence. The
+successful response includes gateway server time and the persisted
+<code>session_deadline_at</code>. The wrapper anchors
+<code>session_deadline_at - server_time</code> to the earlier pre-request
+monotonic instant, so Cloud Run startup and response delay consume rather than extend the frozen Session timeout. The winning wrapper verifies
+the input, checks out only the frozen commit, and starts the selected
+runtime in the checkout. Checkout and agent execution share that
+deadline. After it expires, the wrapper kills the process group and
+exits nonzero. It cannot publish new evidence, restart the agent, or
+perform repository tool actions. Factory's durable timeout record is
+authoritative and may reference only bounded evidence uploaded before
+authority expired.</p>
+</div>
+<div class="source-block" data-source-block="26"
+data-source-sha256="b521736e57761f2b219790511f4a96613df8c1e8166fece3076cf1262494ca56">
+<p>The dispatcher requests an authority refresh every ten seconds while
+it owns the Attempt. The gateway performs the conditional write and
+computes <code>valid_until</code> as the earlier of 30 seconds from its
+own server clock and the frozen Session deadline. The wrapper checks authority before agent launch and at most every five seconds while the
+process runs. An expired, cancelled, mismatched, or timed-out Attempt
+starts shutdown of the runtime process group. This preserves fail-closed
+lease behavior without making the local Factory API reachable from the
+internet. Cloud execution therefore depends on one continuously running
+Factory control plane in the first release. Closing a laptop-hosted
+control plane deliberately stops its Cloud Jobs within the authority
+window.</p>
+</div>
+<div class="source-block" data-source-block="27"
+data-source-sha256="165c6aa260c9357a3171099bab7cf77e2dd42c962e21268e1d243925d8604c68">
+<p>The wrapper uploads normalized event batches with stable sequence
+numbers. Factory polls and ingests those batches idempotently into the
+existing Attempt event history. Cloud Logging receives a sanitized
+diagnostic mirror but is not the event database.</p>
+</div>
+<div class="source-block" data-source-block="28"
+data-source-sha256="c7f985bc3f1ba87ada38ad6ebfa057573c6d95ec93dba16b2ae9364d7a33bd44">
+<p>Before exit, the wrapper uploads a bounded result, Git status,
+checksummed patch or Git recovery bundle, untracked-file archive when
+present, model cost, and a final manifest. The manifest binds the
+Attempt ID, run ID, exact commit, canonical input digest, image digest,
+runtime and model, Cloud execution identity, and byte length and SHA-256
+digest of every required output. It is written last. Factory rejects an
+object or manifest whose storage generation, prefix, identity, digest,
+or immutable input does not match the dispatch record. Transport checks
+are not enough for success. In a temporary verification checkout at the
+frozen commit, Factory applies a patch with
+<code>git apply --check</code> before applying it, or verifies a Git
+bundle, its advertised tip, and the frozen commit as the expected base.
+It extracts untracked content only after rejecting absolute paths,
+<code>..</code> traversal, links, devices, excess file counts, and
+excess expanded bytes. Factory then compares the reconstructed Git
+status and working-tree manifest with the wrapper's manifest. Any
+malformed, non-applicable, incomplete, or semantically mismatched
+recovery artifact fails the Attempt. Partial artifacts remain visible on
+failure.</p>
+</div>
+<div class="source-block" data-source-block="29"
+data-source-sha256="2898726b23fccd1532805c380790de033233a63bf973576a90a968297d07b138">
+<p>Cancellation first records Factory's intent and revokes authority.
+The dispatcher then calls the Cloud Run cancellation API and keeps
+reconciling until Google reports a terminal execution. A result
+published after the cancellation decision is retained for inspection but
+cannot turn the Attempt into succeeded.</p>
+</div>
+<section id="guided-setup-and-operator-experience" class="source-block"
+data-source-block="30"
+data-source-sha256="2aae445cacfd7116e5e59c130cfa99defa0850b93037af319e1c7c147819b429">
+<h3>Guided setup and operator experience</h3>
+</section>
+<div class="source-block" data-source-block="31"
+data-source-sha256="d681afe533421896cf099238a26a964ed2587acf145a2e12ee4ad4c3290bbac1">
+<p>Persistent Workers remain available with no Google Cloud
+configuration. An operator who adds a Cloud Run profile supplies a
+project, region, and billing account, then asks Factory to validate or
+provision the managed resources. The setup creates or verifies required
+APIs, Artifact Registry, immutable Job versions, artifact storage, the
+Attempt gateway, separate dispatcher, gateway, and Job service accounts,
+exact secret bindings, budget alerts, and the dispatcher identity. It
+prints every permission before applying it and can run in
+validation-only mode.</p>
+</div>
+<div class="source-block" data-source-block="32"
+data-source-sha256="32abcaae71a592484df818cd53b43d35534c5aab6669052109c993608cbb4993">
+<p>The setup screen reports image digest, region, available capacity,
+supported runtimes and models, secret readiness, artifact retention, and
+the latest validation. It never labels the backend as
+infrastructure-free or unlimited. A disabled or unhealthy profile
+remains visible with an actionable reason and cannot receive new Runs.</p>
+</div>
+<div class="source-block" data-source-block="33"
+data-source-sha256="2ec1f67d6e72e0c6ff277ae80b572c84a7e193dcc62dd86721ac1dba451cd861">
+<p>Task authoring keeps its current runtime field and gains an
+optional default execution profile. A missing profile means the built-in
+<code>persistent-auto</code> profile, so every existing Task keeps
+its current behavior without a data migration. A manual Run request may
+override the default with any compatible profile without creating a new Task generation. A scheduled Run uses the Task default. A Run freezes the effective profile version, runtime, provider, and model at
+admission. A retry cannot change backend, and Factory does not
+automatically fail over between backends in the first release.</p>
+</div>
+<div class="source-block" data-source-block="34"
+data-source-sha256="baedf3d7d1f93e0350f4def1a9de8a06f9b18696f37aafd140825c216a2ac1c5">
+<p>Run and Attempt detail show the selected backend, but lists and
+metrics continue to use one product lifecycle across both backends.</p>
+</div>
+<section id="google-cloud-deployment-and-authentication"
+class="source-block" data-source-block="35"
+data-source-sha256="bb324ccfed8b2fd06104f5f6166724f907867874b8d65a92aba7818124770bb5">
+<h3>Google Cloud deployment and authentication</h3>
+</section>
+<div class="source-block" data-source-block="36"
+data-source-sha256="20d3514fd10a23033d5118c361ec1981eccabafb0e1acbf897a8e419488cc7d1">
+<p>The first supported hosted control plane is one dedicated Compute
+Engine VM. It runs <code>factory-server</code>, SQLite on persistent
+disk, the scheduler, and the Cloud Run dispatcher. It does not run
+<code>factory-worker</code> or any coding-agent process. The operator
+keeps the existing loopback-only API and reaches it with an SSH tunnel.
+Running <code>factory-server</code> itself as a Cloud Run service would
+require a separate design for durable state, leader election,
+continuously running dispatch, and operator authentication.</p>
+</div>
+<div class="source-block" data-source-block="37"
+data-source-sha256="b289be5b82052a908bb195866e9ea20181ac48080cbe2ff6e8271d13111dee45">
+<p>The VM has one dedicated dispatcher service account attached at
+creation and uses the <code>cloud-platform</code> OAuth scope. IAM
+supplies the narrow authorization. The hosted profile fixes
+<code>credential_mode</code> to <code>compute_metadata</code>. In this
+mode Factory rejects a set <code>GOOGLE_APPLICATION_CREDENTIALS</code>
+variable and a local ADC file at Google's well-known path, then obtains
+short-lived access and ID tokens directly from the Compute Engine
+metadata server. It does not use the generic <a
+href="https://docs.cloud.google.com/docs/authentication/application-default-credentials">Application
+Default Credentials search order</a>, which could prefer a credential
+file over the attached identity.</p>
+</div>
+<div class="source-block" data-source-block="38"
+data-source-sha256="47771c5e7ef8777f58fe03fb2b6d0325920fbfe76842af553b6bb167e2bba74b">
+<p>Local development uses a separate <code>impersonated_adc</code> mode.
+Its ADC file must be an impersonated-service-account configuration
+targeting the expected dispatcher subject. Factory rejects
+<code>service_account</code> key files and plain
+<code>authorized_user</code> ADC for dispatch. A human developer
+receives Token Creator on only the dispatcher service account.
+Validation-only setup may use the human's existing Google session, but
+it cannot enable or run a profile. Neither mode makes
+<code>gcloud</code> a Factory runtime dependency. User-managed
+service-account keys are unsupported, and setup recommends enforcing the
+organization policies that disable key creation and upload, following
+Google's <a
+href="https://docs.cloud.google.com/iam/docs/best-practices-service-accounts">service-account
+security guidance</a>.</p>
+</div>
+<div class="source-block" data-source-block="39"
+data-source-sha256="1291504a733f31c7707232fbaa28e7386dbca28bd6da938d12fbfccf0dabe5e7">
+<p>Factory uses access tokens with Google client libraries and the Cloud
+Run v2 API. Gateway calls carry an audience-bound Google-signed ID token
+in exactly one <code>Authorization: Bearer</code> header. The caller
+never uses <code>X-Serverless-Authorization</code>, and the gateway
+rejects that header, a missing or repeated Authorization header, or
+another authentication scheme. Before reading a request body, the
+gateway verifies the Google signature, issuer, expiry, exact service URL
+or configured custom audience, immutable numeric <code>sub</code>, and
+the path-specific dispatcher or Job allowlist. This follows Google's <a
+href="https://docs.cloud.google.com/run/docs/authenticating/service-to-service">service-to-service
+authentication contract</a> while preserving the signed token for
+application verification.</p>
+</div>
+<div class="source-block" data-source-block="40"
+data-source-sha256="924a4b2d1295301f6a2d9c668d033502840b51c017030e36bb158d17f3b80842">
+<p>The identity and binding table is normative:</p>
+</div>
+<div class="source-block table-wrap" data-source-block="41"
+data-source-sha256="8387e802ac374b64ea3edcc58cc162e27882a236e6955cd0414f63846b3d6e2f">
+<table>
+<thead>
+<tr>
+<th>Identity</th>
+<th>Retained grant</th>
+<th>Resource scope</th>
+<th>Forbidden at runtime</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Provisioning operator or temporary provisioner</td>
+<td>None managed by Factory after setup validation</td>
+<td>Setup session only</td>
+<td>Credentials in Factory, gateway, Job, config, or SQLite</td>
+</tr>
+<tr>
+<td>Dispatcher service account</td>
+<td>Custom Job dispatcher role containing <code>run.jobs.get</code>,
+<code>run.jobs.run</code>, <code>run.jobs.runWithOverrides</code>,
+<code>run.executions.get</code>, <code>run.executions.list</code>,
+<code>run.executions.cancel</code>, and
+<code>run.executions.delete</code>; custom operation reader containing
+only <code>run.operations.get</code>; custom gateway reader containing
+only <code>run.services.get</code>; custom identity reader containing
+only <code>iam.serviceAccounts.get</code>;
+<code>roles/run.servicesInvoker</code></td>
+<td>Job dispatcher on each versioned Job; operation reader on the
+project; gateway reader and invoker on the one gateway; identity reader
+on the dispatcher, gateway, and Job service-account resources</td>
+<td>Job create, update, delete, or IAM changes; service-account
+impersonation; artifact objects; model secrets</td>
+</tr>
+<tr>
+<td>Gateway service account</td>
+<td><code>roles/storage.objectAdmin</code></td>
+<td>Dedicated artifact bucket</td>
+<td>Cloud Run Job administration, model secrets, Factory operator
+API</td>
+</tr>
+<tr>
+<td>Profile Job service account</td>
+<td><code>roles/run.servicesInvoker</code>;
+<code>roles/secretmanager.secretAccessor</code></td>
+<td>One gateway service; one dedicated model secret</td>
+<td>Artifact bucket, Cloud Run administration, Factory operator API,
+sibling model secrets</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="source-block" data-source-block="42"
+data-source-sha256="d595bbb93b5c9a8a42508609732a95cce410883916d567633837f1884bef4628">
+<p>These are the complete Factory-managed bindings. A runtime principal
+with any other direct or inherited project, folder, organization,
+resource, or service-account binding fails deployment validation.
+Google-managed service agents are outside this table and never run
+Factory code. The provisioning operator's pre-existing human
+administration is part of the deployment trust boundary, not a Factory
+runtime identity.</p>
+</div>
+<div class="source-block" data-source-block="43"
+data-source-sha256="8c76acb68ce4eea06f34f8002b2b0394bac824418b3d22795349449183cf2f81">
+<p>The supported setup uses the operator's current identity or a
+temporary provisioner identity to enable APIs and create resources.
+Setup prints its permission plan before applying it. Factory never
+stores that identity. If a temporary provisioner service account is
+used, setup removes all of its project and resource bindings after
+runtime validation; later changes require an explicit operator session
+to grant them again. The runtime bindings above are resource-level
+except <code>run.operations.get</code> where Google requires a wider
+parent. Google provides execution and cancellation through the <a
+href="https://docs.cloud.google.com/run/docs/reference/iam/roles">Cloud
+Run Jobs Executor With Overrides role</a>, but Factory uses the
+documented custom role so drift inspection and <a
+href="https://docs.cloud.google.com/run/docs/reference/rest/v2/projects.locations.jobs.executions/delete"><code>run.executions.delete</code></a>
+do not require Cloud Run Developer.</p>
+</div>
+<div class="source-block" data-source-block="44"
+data-source-sha256="cf53da4aacf32b814c70207de6aefcddf748efc6159848c68bc171abdf30764f">
+<p>Profile validation obtains both token types, verifies the active
+subject, reads the immutable Job and gateway service, resolves the
+immutable numeric IDs of every expected service account, and checks
+required and explicitly forbidden dispatcher permissions before enabling
+new dispatch. Hosted mode also reads the attached service-account
+identity from the metadata server before every Run call and authority
+refresh, so an active identity change is detected within the ten-second
+refresh interval even while an earlier token remains valid. Idle
+profiles repeat the full validation every 30 seconds. Tokens remain in
+process memory only and are never written to SQLite, config, events,
+artifacts, logs, or Cloud Run overrides.</p>
+</div>
+<section id="delivery-sequence" class="source-block"
+data-source-block="45"
+data-source-sha256="92c2a16162a9d15bcec2532e46448abcb129385b447353f23e05f6958c5f63fa">
+<h3>Delivery sequence</h3>
+</section>
+<div class="source-block" data-source-block="46"
+data-source-sha256="18349abd888a24a4852e8a52de4cf180adc2644ac67952ffd3dc5608e91237c3">
+<p>The work ships in six independently reviewable slices:</p>
+</div>
+<div class="source-block" data-source-block="47"
+data-source-sha256="7c1e10b7f8052f59ec4bda406850ed58d0d8b5fa68e285de983573e8f9c3c0d0">
+<ol type="1">
+<li><strong>Backend contract.</strong> Add immutable execution-profile
+versions, a manual Run override, cloud repository input resolution, and
+a fake cloud backend behind the current Run and Attempt state machine.
+Existing Persistent Worker configuration and commit-resolution behavior
+remain compatible.</li>
+<li><strong>Artifact protocol.</strong> Define canonical input,
+authority, start fence, ordered event batches, recovery artifacts,
+checksums, size limits, retention, and the Attempt gateway against local
+test doubles.</li>
+<li><strong>Durable dispatcher.</strong> Add dispatch persistence,
+zero-retry launch, authority renewal, cancellation, bounded polling,
+restart reconciliation, quota backoff, and duplicate-start tests against
+a fake Cloud Run API.</li>
+<li><strong>Managed runner.</strong> Turn the experimental image into
+the trusted Job wrapper, pin its dependencies and image digest, and
+prove read-only, patch-producing, cancellation, lease-expiry, and
+corrupt-artifact cases in a real test project.</li>
+<li><strong>Product setup.</strong> Add profile configuration,
+validation, guided resource provisioning, health, cost evidence, Attempt
+diagnostics, and operator documentation.</li>
+<li><strong>Repository publishing.</strong> After the lifecycle is
+stable, add short-lived, repository-scoped credentials for private
+checkout and branch or pull-request publication. The first five slices
+require only durable patch recovery.</li>
+</ol>
+</div>
+<div class="source-block" data-source-block="48"
+data-source-sha256="793358804c27532fad31e76a934b61d3802e895fb27e504ecb4589853dde5f66">
+<p>Each slice must preserve the invariants and pass independent review
+before the next slice depends on it. The Cloud backend remains disabled
+by default until the real-project acceptance suite passes.</p>
+</div>
+<section id="components-and-responsibilities" class="source-block"
+data-source-block="49"
+data-source-sha256="ec9a76783795a31c5a8fa78eb007e1288ed67056f6e893afc753006cc7f2e898">
+<h3>Components and responsibilities</h3>
+</section>
+<div class="source-block" data-source-block="50"
+data-source-sha256="9e08007553e94e2eb49f02cb5a0a38e2b89491d6b0a33115b8cdb1484ce9fb33">
+<p>The execution router owns backend selection from the effective
+profile frozen in the immutable Run snapshot and compatible capacity.
+The Task default or manual Run override chooses that profile before
+admission. The router depends on configured backend profiles. It does
+not interpret runtime output or call cloud APIs, and it does not move an
+admitted Session to another backend.</p>
+</div>
+<div class="source-block" data-source-block="51"
+data-source-sha256="91591927b386fb18a18100768461e7a3a58b092448b9a0e60d1c47b7f0a95aa3">
+<p>The cloud repository input resolver owns mutable-ref resolution for
+Cloud Runs. It records the requested source ref, resolved full commit,
+resolver identity, and resolution time on each cloud Run Session before
+that Session can queue. A cloud retry never resolves the ref again.
+Persistent Workers keep the current <code>resolve_per_attempt</code>
+behavior in the first release, including resolving the base again on explicit retry. The Run records the resolution policy so the difference is
+visible rather than implied to be uniform.</p>
+</div>
+<div class="source-block" data-source-block="52"
+data-source-sha256="cea70ca5ae0ef28be793b762e78fcb11411f5f3a4d6124015626584da12c919b">
+<p>One enabled Cloud Run profile projects into one stable synthetic
+Worker pool in the existing routing model. The pool advertises
+configured capabilities, health, and capacity, but it never enrolls,
+polls, or holds a remote Worker credential. The dispatcher claims and supervises work internally on its behalf. This preserves non-null
+Execution and Attempt worker attribution while making the different
+recovery contract explicit in the Worker and Attempt views.</p>
+</div>
+<div class="source-block" data-source-block="53"
+data-source-sha256="22ebed26eedadce538698161906960862b218aa4a506dd80862ef925834556ff">
+<p>The persistent Worker backend is the current Worker manager and
+supervisor. It owns subscription-backed CLI sessions, repository caches,
+worktrees, process groups, and local recovery. It does not manage cloud
+resources.</p>
+</div>
+<div class="source-block" data-source-block="54"
+data-source-sha256="c3372dc4bbc524b214a329f640dbf0868bef5ac5c423a13d2e362d70cf1e3640">
+<p>The Cloud Run dispatcher is a durable control-plane component. It
+owns dispatch records, Cloud Run API calls, Attempt lease renewal,
+authority refresh, event ingestion, artifact verification, cancellation,
+and restart reconciliation. It does not run an agent or make Cloud Run
+state authoritative.</p>
+</div>
+<div class="source-block" data-source-block="55"
+data-source-sha256="844e66b6a0360dcc968e79e8d5156b428bade131134e4d734738c3735125b770">
+<p>The Attempt gateway is a narrow authenticated Cloud Run service with
+separate Job and dispatcher surfaces. The Job surface maps one Job
+identity plus one random run capability to one active Attempt and
+exposes only input read, authority read, conditional start-fence
+creation, bounded event append, and bounded output publication. The
+dispatcher surface authenticates Factory's dedicated dispatcher service
+identity and exposes only initial-authority creation, conditional
+authority refresh, conditional revocation, and trusted gateway-time and
+authority-status reads for the named Attempt and run ID. Job identities
+cannot invoke dispatcher operations, and dispatcher credentials are
+never present in the Job. Every authority mutation requires the expected
+object generation and an active matching dispatch registration. The
+gateway service account, not the Job service account, accesses the
+artifact bucket. It rejects unknown, expired, terminal, mismatched,
+cross-prefix, conflicting, and oversized operations.</p>
+</div>
+<div class="source-block" data-source-block="56"
+data-source-sha256="b1980d3e8c41396c781efe62bdfec27a29d47dfe94ccaf897e660f57386c6967">
+<p>The Job wrapper is the trusted container entrypoint. It owns input
+validation, the start fence, exact checkout, runtime supervision,
+authority checks, event normalization, monotonic timeout enforcement,
+artifact publication, and exit status. It does not choose work, retry an Attempt, or decide Factory's terminal outcome.</p>
+</div>
+<div class="source-block" data-source-block="57"
+data-source-sha256="bfd5b869dab19b6bf9ea1519cf53505d026dc328a61d07d6b264a11b656673a9">
+<p>The agent runtime owns model interaction and engineering tool use. It
+receives one prepared checkout and a bounded prompt. It does not receive
+control-plane credentials or authority to dispatch other Jobs.</p>
+</div>
+<div class="source-block" data-source-block="58"
+data-source-sha256="cdfebe79803eebb3ef0f09a921deba752532956b5af4df7d419c9dfb140be472">
+<p>The artifact store holds immutable input, authority, event, and
+output objects. It is transport and recovery storage, not the source of
+Factory lifecycle truth. Factory remains able to rebuild its view from
+SQLite and reconcile nonterminal cloud dispatches.</p>
+</div>
+<section id="decisions" class="source-block role-decisions"
+data-source-block="59"
+data-source-sha256="5a6a5f0f1903f8ea343148136e7bb0710d2555ca216504d9bf9d9b532157aa00">
+<h3>Decisions</h3>
+</section>
+<section id="two-backends-one-product-contract" class="source-block"
+data-source-block="60"
+data-source-sha256="d1e24558d1ad4f7abdf607d3bd3c7fd192869f12d603a46ef9c44e6be118eb06">
+<h4>Two backends, one product contract</h4>
+</section>
+<div class="source-block" data-source-block="61"
+data-source-sha256="e96af2a6b53b079484de93ac6e9f656eb89c9bb9f73c4c4da9ecb012fad2143b">
+<p>Persistent Workers and Cloud Run Jobs produce the same Run, Session,
+Attempt, event, result, cancellation, and retry experience. We reject a
+separate "cloud task" product because execution location must not split
+Task history or metrics.</p>
+</div>
+<section id="backend-choice-freezes-on-the-run" class="source-block"
+data-source-block="62"
+data-source-sha256="3aaefd284114e9c5bf1644cf4f0f220199073cc28cd1b3d5b0bf984f0cab046f">
+<h4>Backend choice freezes on the Run</h4>
+</section>
+<div class="source-block" data-source-block="63"
+data-source-sha256="09edb71e64ea7891361c8b73a64dffd862bb917d4dc2dabf0b9947b66cc0df85">
+<p>An existing Task defaults to <code>persistent-auto</code>. A
+Task may save another default, and a manual Run may override it
+without editing the Task. The effective profile version freezes on
+Run admission and every Session and retry uses it. We reject automatic
+cross-backend failover because the credential, commit-resolution, and
+recovery contracts differ and a retry may repeat external effects.</p>
+</div>
+<section id="backend-runtime-and-model-stay-separate"
+class="source-block" data-source-block="64"
+data-source-sha256="cd0bdf6d1e170adcb7a65b77514ca71f54626564f8d3c95d3d7d730521b5cb87">
+<h4>Backend, runtime, and model stay separate</h4>
+</section>
+<div class="source-block" data-source-block="65"
+data-source-sha256="6b3ec723ddf12279e989eb0813ad4a9afa720ce17005220793c1f4fa3c320cdd">
+<p>An execution profile combines compatible settings without making them
+one identity. We reject <code>deepseek_cloud</code> or similar backend
+names because Pi can use DeepSeek locally and a Cloud Run image can
+support other API-backed models.</p>
+</div>
+<section id="outbound-only-control" class="source-block"
+data-source-block="66"
+data-source-sha256="d89d4af8a74eb6dcf79550b3b01aff82e0facf54bcf1ed0e488bd83803310d08">
+<h4>Outbound-only control</h4>
+</section>
+<div class="source-block" data-source-block="67"
+data-source-sha256="c97d642e8c41b06e763f6767e05c2dc9bb4b719a3a7790590d2e4338a1712356">
+<p>The first integration uses outbound Google APIs and cloud storage. We
+reject a public callback into Factory because the operator API is
+loopback-only and the current product has no tenant authentication
+boundary. A later hosted Factory deployment may replace polling with an
+authenticated private callback or queue without changing Attempt
+identity.</p>
+</div>
+<section id="factory-owns-retries" class="source-block"
+data-source-block="68"
+data-source-sha256="0315f3666c39f78cb42b275070c3dcd8df767a0da3c53ecd6db80b6e397fbf18">
+<h4>Factory owns retries</h4>
+</section>
+<div class="source-block" data-source-block="69"
+data-source-sha256="7688f12876cc823afdd76aedf6f1ae94fa649f7b27ba3d87e121292228798716">
+<p>Cloud Run task retries are zero. Every operator retry creates a new
+Factory Attempt, run ID, run capability, and cloud execution while
+reusing the original frozen Run input. We reject native task retries
+because an agent may already have made external side effects and Factory
+must preserve one visible retry history.</p>
+</div>
+<section id="durable-artifact-replaces-retained-worktree"
+class="source-block" data-source-block="70"
+data-source-sha256="2886890aeb9b6131d6e413f2963b8b81203f13936c3201126ad2262056961e07">
+<h4>Durable artifact replaces retained worktree</h4>
+</section>
+<div class="source-block" data-source-block="71"
+data-source-sha256="a55e61a12e60d44e15a593755efad3d6cdc152cd745fe6baabbe2aa30dcef1fb">
+<p>Persistent Workers keep the current retained-worktree contract. Cloud
+Jobs publish a recovery artifact because their filesystem is ephemeral.
+We reject success based only on exit code or logs because either can be
+present without recoverable Git output.</p>
+</div>
+<section id="cloud-logging-is-a-mirror" class="source-block"
+data-source-block="72"
+data-source-sha256="06833799de68643daf0912ba1780261b609188b269f36bbe5c915f264c80798a">
+<h4>Cloud Logging is a mirror</h4>
+</section>
+<div class="source-block" data-source-block="73"
+data-source-sha256="5e8f19de3db4094002a01c153b6a24e9069e4658d60f2f94a0d803c368ea6bec">
+<p>Structured Cloud logs remain useful for live operator inspection and
+platform diagnosis. Ordered event objects and the verified final
+manifest drive Factory state. We reject parsing Cloud Logging as the
+event protocol because delivery, ordering, retention, and redaction are
+controlled outside Factory.</p>
+</div>
+<section id="trusted-repositories-first" class="source-block"
+data-source-block="74"
+data-source-sha256="54c906f1a5e3258c70ebd293dbad4fe989f55c18564915a7caafa75965c8c551">
+<h4>Trusted repositories first</h4>
+</section>
+<div class="source-block" data-source-block="75"
+data-source-sha256="a783f7d55e43595cc7d58a3ad71728d3536754cad60664c102a768d13c9b7524">
+<p>The first release supports repositories and prompts trusted by the
+Factory operator. Cloud Run supplies disposable container isolation, not
+a promise that hostile code cannot read injected credentials, use the
+Job service account, or send network traffic. Arbitrary untrusted code
+requires a separate threat model and stronger controls.</p>
+</div>
+<section id="immutable-job-versions" class="source-block"
+data-source-block="76"
+data-source-sha256="a27722f090b090c995e2a281fd1fdc8090e7649e7ca34dfa97f4e8b0c4d99985">
+<h4>Immutable Job versions</h4>
+</section>
+<div class="source-block" data-source-block="77"
+data-source-sha256="7a5f0fa1d8e8c5d7f56cbcd2cb7218e6cc30ae79c65d2f99c777477ed8a375bd">
+<p>Cloud Run Run overrides cannot change an image or service identity.
+Every execution-profile edit that affects the image digest, service
+account, mounted secret version, resources, timeout, or wrapper
+configuration creates a new immutable profile version and a distinct versioned Job resource. A Run freezes that version before dispatch.
+Referenced versions cannot be deleted. An explicit retry uses the same
+version; if it is unavailable, Factory blocks the retry instead of
+silently running different code.</p>
+</div>
+<section id="direct-apis-with-attached-workload-identity"
+class="source-block" data-source-block="78"
+data-source-sha256="6a662ccdd2a65e23df7e47f2d8df51dbf130a86a9dadc8aec490e93ebb34f9a5">
+<h4>Direct APIs with attached workload identity</h4>
+</section>
+<div class="source-block" data-source-block="79"
+data-source-sha256="1119e0d4e91074bd98ad97398456a9f352cbb99db3455c3036f88d41a3160a21">
+<p>Factory uses Google client libraries and direct v2 APIs. Hosted mode
+obtains credentials only from Compute Engine metadata, while development
+dispatch uses explicit service-account impersonation through ADC. We
+reject invoking <code>gcloud</code> from the dispatcher because CLI
+configuration, output, and subprocess state are not a durable runtime
+contract. We also reject downloaded service-account keys because they
+are long-lived bearer credentials that add rotation and leakage risk.
+The cost is that setup must attach and validate a dedicated workload
+identity before a cloud profile can be enabled.</p>
+</div>
+<section id="dedicated-control-plane-vm" class="source-block"
+data-source-block="80"
+data-source-sha256="4d5069cbe89f3060e1de5d657d999ff64bf90bddd67783ad0799708be462b80f">
+<h4>Dedicated control-plane VM</h4>
+</section>
+<div class="source-block" data-source-block="81"
+data-source-sha256="53e70c5c367698e3667a31b7cc2ce755bc6fe9d758743dd8e3d61db026493da2">
+<p>The first hosted deployment uses a dedicated Compute Engine VM
+because the current control plane owns local SQLite, continuous
+dispatch, and a loopback operator API. We reject co-locating a
+persistent Worker on that VM because agent and repository code could
+obtain the VM's dispatcher identity from the metadata server. We also
+defer hosting Factory itself on Cloud Run because that requires a
+different persistence, leadership, and operator-authentication
+design.</p>
+</div>
+</div>
+<div class="document-section">
+<section id="5-invariants-and-requirements" class="source-block"
+data-source-block="82"
+data-source-sha256="a564a89ef16d655f45f32b2298c33c4d79e1b4129c3a882f233e5c6d85b55fc2">
+<h2>5. Invariants and requirements</h2>
+</section>
+<section id="invariants" class="source-block role-invariants"
+data-source-block="83"
+data-source-sha256="41701f368993e3f63ab599cb3ebcf32756d56c298bf06612195e918bf86cd6b4">
+<h3>Invariants</h3>
+</section>
+<div class="source-block" data-source-block="84"
+data-source-sha256="537f5c5f2714d6c9de1c005853e96e7c9ad323776844f3897872d34bf99c9158">
+<ul>
+<li><code>INV-1</code>: Factory is the sole authority for Run, Attempt,
+retry, cancellation, and terminal state.</li>
+<li><code>INV-2</code>: Every cloud Run Session freezes one full commit
+SHA, prompt, runtime, provider, model, and execution-profile version
+before its first dispatch; every cloud retry reuses them.</li>
+<li><code>INV-3</code>: At most one agent process can pass the start
+fence for one Attempt and run ID.</li>
+<li><code>INV-4</code>: Authority expiry starts process-group shutdown
+immediately and the wrapper sends SIGKILL no later than ten seconds
+after expiry.</li>
+<li><code>INV-5</code>: Cloud Run task retries remain zero; Factory
+creates every retry.</li>
+<li><code>INV-6</code>: Event ingestion is ordered and idempotent by
+Attempt, run ID, sequence, and event ID.</li>
+<li><code>INV-7</code>: Factory accepts successful completion only after
+verifying the final manifest and every required artifact.</li>
+<li><code>INV-8</code>: Cancellation or timeout intent committed before
+terminal success cannot become succeeded because of prior artifact
+ingestion or a late cloud result. The first committed success,
+cancellation, or timeout intent owns the outcome.</li>
+<li><code>INV-9</code>: A control-plane restart can identify, reconcile,
+and either resume supervision or cancel every nonterminal cloud
+execution.</li>
+<li><code>INV-10</code>: The Job receives no operator API credential or
+broad cloud administration role.</li>
+<li><code>INV-11</code>: Cloud and persistent backends use the same
+user-facing Task, Run, Session, result, retry, and cancellation
+concepts.</li>
+<li><code>INV-12</code>: Cloud execution never weakens the loopback-only
+operator API.</li>
+<li><code>INV-13</code>: A Job identity and run capability can access
+only its own Attempt protocol and cannot read or mutate a sibling
+Attempt.</li>
+<li><code>INV-14</code>: The gateway refuses to start an agent at or
+after the frozen Session deadline. Factory times out and cancels an
+accepted execution that has not started by then. A running wrapper
+starts process-group shutdown at the same deadline and sends SIGKILL no
+later than ten seconds afterward, independent of the longer profile or
+Cloud Run Job timeout.</li>
+<li><code>INV-15</code>: Hosted Factory authenticates Google runtime
+calls only through the attached Compute Engine metadata identity and
+direct APIs. Development dispatch permits only explicit ADC
+service-account impersonation. Neither mode invokes <code>gcloud</code>
+or accepts a user-managed key at runtime.</li>
+<li><code>INV-16</code>: Provisioning, dispatcher, gateway, and Job
+runtime identities stay separate. No runtime identity can change IAM
+policy or assume another runtime identity.</li>
+<li><code>INV-17</code>: The gateway accepts a dispatcher or Job call
+only when its Google-signed ID token has the exact audience and expected
+immutable service account subject for that surface.</li>
+<li><code>INV-18</code>: No coding-agent process runs on the Compute
+Engine VM that owns the dispatcher service account.</li>
+</ul>
+</div>
+<section id="requirements" class="source-block role-requirements"
+data-source-block="85"
+data-source-sha256="d58a3741c408d72bf8e99cb9c99f055d7cabeda3c3b4d006597446e8412a7e76">
+<h3>Requirements</h3>
+</section>
+<div class="source-block" data-source-block="86"
+data-source-sha256="6450bb661d9bd542be5bbc62bef462fcb34d802a677a912f85ef46b7fe2a7666">
+<ul>
+<li>One backend profile has a stable ID and immutable versions. Each
+version has a Google Cloud project and region, Job resource, image
+digest, service account, dedicated model-secret resource, artifact
+gateway, capacity limit, trust tier, and supported runtime and provider
+capabilities.</li>
+<li>A Task stores an optional default backend profile. A manual Run
+may supply a compatible override. The admitted Run snapshot records the
+effective profile version, runtime, provider, model, timeout, resource
+class, and commit resolution policy. Editing a Task or profile does
+not change existing Runs.</li>
+<li>Dispatch stores the Attempt ID, non-secret run ID, run-capability
+digest, envelope-encrypted run-capability ciphertext, state, immutable
+profile version, every observed Cloud operation and execution name,
+timestamps, gateway-derived <code>session_started_at</code> and
+<code>session_deadline_at</code>, the last acknowledged authority
+generation, an early fail-closed client deadline, a conservative
+authority-expiry upper bound, any single outstanding refresh request ID,
+error, and reconciliation deadline.</li>
+<li>The Job input uses the full commit SHA. Branch names and mutable
+tags are rejected.</li>
+<li>Before every Run call, the dispatcher reads the Job and verifies its
+resource name, template digest, image digest, service account,
+model-secret resource and version, task count of one, and native retry
+count of zero against the frozen profile version. It also requires
+current authority and a conservative monotonic Session deadline that has not expired. Drift or expiry blocks dispatch. The wrapper repeats the
+verifiable checks and binds the effective values into its final
+manifest.</li>
+<li>Dispatch and reconciliation respect the profile capacity and Google
+Cloud API, CPU, memory, and execution quotas. Quota pressure leaves work queued or blocked with an actionable reason; it does not create extra
+executions.</li>
+<li>Dispatch retries transient pre-launch failures after one second with
+jitter, doubles to at most 30 seconds, and stops after the five-minute
+dispatch deadline. The dispatcher polls running execution state at most
+five seconds apart and event objects at most two seconds apart.</li>
+<li>The wrapper checks authority at most five seconds apart. Authority
+remains valid for no more than 30 seconds without a dispatcher
+refresh.</li>
+<li>The immutable input includes <code>timeout_seconds</code>. The
+gateway start-fence response supplies trusted server time and the
+persisted <code>session_deadline_at</code> established before the Run call.
+The wrapper anchors the remaining duration to the monotonic instant
+recorded before the request, producing a conservative deadline shared by
+Cloud Run startup, checkout, and agent execution. At the deadline
+Factory records timeout intent in SQLite, while the wrapper applies the
+ten-second process-group kill rule, stops all Job-originated gateway
+writes, and exits nonzero. Gateway control-plane authority revocation
+remains permitted. A wrapper has no more than five minutes from process
+start to acquire its fence and never beyond
+<code>session_deadline_at</code>. The versioned Cloud Run Job timeout is at least the maximum Session timeout plus ten seconds and is a platform safety limit, not the Session timeout.</li>
+<li>Event and completion sizes reuse the existing Attempt limits.
+Artifact size defaults to 64 MiB and has a 512 MiB maximum. Completion
+is rejected when the configured bound is exceeded.</li>
+<li>Cloud execution status, model cost, compute duration, image digest,
+and console log URL appear in Attempt detail.</li>
+<li>The hosted Factory VM has one dedicated attached dispatcher service
+account, the <code>cloud-platform</code> OAuth scope, and no downloaded
+Google credential file. IAM, not narrower VM access scopes, restricts
+its resource access.</li>
+<li>Hosted Factory rejects environment or well-known-file ADC and calls
+the Cloud Run v2 API with metadata-backed access tokens. Development
+dispatch accepts only impersonated-service-account ADC. Both modes call
+the gateway with short-lived ID tokens whose audience is the exact
+configured service URL or custom audience. Token values are never
+persisted.</li>
+<li>The dispatcher may read and run only configured immutable Jobs,
+inspect, cancel, and delete their executions, read their operations, and
+invoke the gateway. It cannot create, update, delete, or change IAM on a
+Job, impersonate another service account, or access a model secret.</li>
+<li>The gateway service account has object administration only on the
+dedicated artifact bucket. Each Job service account can invoke the
+gateway and access only its profile's pinned model secret. These
+bindings are resource-level, not project-wide.</li>
+<li>Startup validates the configured credential mode, the active
+dispatcher subject, both token types, the Job and gateway resources,
+every configured service-account subject, and required and forbidden
+permissions. Hosted mode revalidates its attached identity before every
+Run and authority refresh. A failed check leaves the profile disabled
+and starts no Cloud Run execution.</li>
+<li>Persistent Workers remain the default backend and require no Google
+Cloud configuration.</li>
+</ul>
+</div>
+</div>
+<div class="document-section">
+<section id="6-interfaces-and-data" class="source-block"
+data-source-block="87"
+data-source-sha256="c031b53bb441f0ffee3273a73ce9f61efab706f92df0957046bc404cf8ffd544">
+<h2>6. Interfaces and data</h2>
+</section>
+<section id="backend-profile" class="source-block"
+data-source-block="88"
+data-source-sha256="8305c0eb42539155c5934303f014436ecdc9820d1dc6c250172a33aa6e515f98">
+<h3>Backend profile</h3>
+</section>
+<div class="source-block" data-source-block="89"
+data-source-sha256="3da6d28d22eef9b82f3f4649c2b5aafc18d0ade9d701cc66501d77b3fbee52c2">
+<p>The first proposed profile fields are:</p>
+</div>
+<div class="source-block" data-source-block="90"
+data-source-sha256="29c9ce2db353c91d3fb67561ba75ab082c0c480f6c6b1f24137d4f23c11c24a5">
+<pre class="text"><code>id
+name
+kind = cloud_run_job
+project
+region
+artifact_bucket
+gateway_url
+credential_mode = compute_metadata | impersonated_adc
+dispatcher_service_account
+gateway_service_account
+max_concurrent
+trust_tier = trusted_repository
+capabilities[] = runtime + provider + model selectors
+enabled</code></pre>
+</div>
+<div class="source-block" data-source-block="91"
+data-source-sha256="ecd72f7b6c75a90857d9ea77ae117b38c92680ac283b3bb3b9e8d7c8aa5387a5">
+<p>Each immutable profile version records <code>job</code>,
+<code>image_digest</code>, <code>job_service_account</code>, resource
+limits, timeout, wrapper configuration, and a dedicated model-secret
+resource with one enabled pinned version. Cloud credential values do not
+belong in this record. The service-account fields are expected principal
+identifiers used for validation, not credentials. Secret values belong
+in Secret Manager and are referenced by the versioned Job
+configuration.</p>
+</div>
+<div class="source-block" data-source-block="92"
+data-source-sha256="8117b927400562145deecddd22fd410b17f884892c89554d9d1b04f62cd76410">
+<p>The dispatcher creates
+<code>attempts/&lt;attempt-id&gt;/gateway-registration.json</code>
+before launch. The immutable registration stores the expected Job
+service-account principal, SHA-256 digest of the run capability,
+non-secret run ID, exact Attempt prefix, input digest, frozen
+<code>timeout_seconds</code>, protocol version, and absolute
+registration expiry. The gateway uses that registered duration and its
+own server time to establish <code>session_started_at</code> and
+<code>session_deadline_at</code>; neither the Job nor a later refresh can
+change them. The Job sends the raw capability only to the gateway. The
+gateway hashes it, uses its own bucket identity to load the registration
+and authority, and never exposes list or arbitrary object operations.
+Authority revocation closes an otherwise valid registration immediately.
+The Job sends the capability only over TLS in an authenticated request
+body. The Job and gateway redact request bodies and authorization data,
+never place the capability in a URL, header echoed by infrastructure,
+metric, trace, error, or log. The wrapper retains the capability only
+for the Job lifetime and clears its copy on shutdown. The gateway
+discards its request copy after each operation.</p>
+</div>
+<section id="naming-and-identity" class="source-block"
+data-source-block="93"
+data-source-sha256="8d3d7b7a1af98b0dfa8eb94237680e19b796bb68dc456be15450d239907cc0ab">
+<h3>Naming and identity</h3>
+</section>
+<div class="source-block" data-source-block="94"
+data-source-sha256="eae37f88a14982a40d48e64ef8500115be627d4a1748599292877a21748e0713">
+<p>A backend profile receives one random stable ID when it is created.
+Its synthetic Worker ID is <code>cloud-run-&lt;profile-id&gt;</code> and
+never changes when the display name, image, region settings, or
+capabilities change. Deleting and recreating a profile creates a new identity. An existing Run continues to point at the frozen old profile and
+synthetic Worker record.</p>
+</div>
+<div class="source-block" data-source-block="95"
+data-source-sha256="1cea3ed7cb2cf8ab525aa3a39227256980afd1b0c3d0a8e224116849fa77734c">
+<p>Google service accounts are stored by full resource name, email, and
+immutable numeric subject. Validation fails if a name is missing,
+resolves to a different subject, or no longer matches the deployed Job
+or gateway. Deleting and recreating a service account with the same
+email therefore cannot inherit an enabled profile silently. Tokens and
+credential file paths are never stored.</p>
+</div>
+<div class="source-block" data-source-block="96"
+data-source-sha256="f3d128900eb113d533f2fad3ec2898317701838f6e09e7fb1d8485d0eda8b5cd">
+<p>The synthetic Worker cannot authenticate to the Worker HTTP API and
+cannot be claimed by an external process. The dispatcher uses an
+internal store transaction to create its Attempt and lease. Attempt and
+run ID identify the dispatch protocol; the Google operation name,
+execution name, and image digest are immutable external observations
+after they become known.</p>
+</div>
+<section id="dispatch-record" class="source-block"
+data-source-block="97"
+data-source-sha256="344d1ca2fcdc5bc5589c9deef97938b7ab8bf83cdf00d8a8505cead607593142">
+<h3>Dispatch record</h3>
+</section>
+<div class="source-block" data-source-block="98"
+data-source-sha256="28c8962ca9eaa085928825db61537deba7feb99c5f716a1715cde6f29bdf95e0">
+<pre class="text"><code>attempt_id
+backend_profile_id
+run_id
+run_capability_digest
+run_capability_ciphertext
+state
+session_started_at
+session_deadline_at
+provider_search_not_before
+provider_search_unbounded
+cloud_operation_name
+cloud_execution_name
+image_digest
+input_object
+authority_object
+artifact_prefix
+last_reconciled_at
+reconciliation_deadline
+error</code></pre>
+</div>
+<div class="source-block" data-source-block="99"
+data-source-sha256="ebff930c433806d62b50d2320ccea06652765b3913754ce1fd0ca5dc2741372a">
+<p>The singular names above are normalized into child observations in
+storage: one dispatch can have several operation and execution records.
+Each record stores its provider name, first and last observation, create
+time, effective override digest, state, and duplicate disposition. The
+winning execution name is set only from the create-only start fence. All
+other matching executions are retained as duplicate evidence and
+cancelled.</p>
+</div>
+<div class="source-block" data-source-block="100"
+data-source-sha256="3e6257e41551b64115081fb32337f33df7dbdf872d50d16c79c38e55fce028cb">
+<p><code>attempt_id</code> is the Factory identity. <code>run_id</code>
+is random, non-secret, and immutable for one dispatch. It is safe for
+object names, events, manifests, logs, and diagnostic URLs. Factory
+envelope-encrypts the separate raw run capability before committing the
+dispatch. The encryption key comes from the host keyring or process
+environment and is never stored in SQLite. The raw value exists
+transiently in dispatcher, Job wrapper, TLS request, and gateway memory.
+Cloud Run retains the raw active execution override as provider-managed
+metadata for its documented execution-retention period, so permission to
+inspect executions is restricted to the dispatcher and operators who may
+inspect model credentials. Factory never stores raw plaintext: SQLite
+stores only <code>run_capability_ciphertext</code>, and the artifact
+store keeps only <code>run_capability_digest</code>. A restart decrypts
+the ciphertext to retry or reconcile the same dispatch. A missing or
+invalid encryption key blocks new cloud Run, revokes authority, and
+fails active dispatches closed rather than minting a new capability.
+Cloud operation and execution names are observations returned by Google
+and never replace Factory identity. Missing names keep the record in
+reconciliation; they do not authorize a second agent to pass the start
+fence.</p>
+</div>
+<section id="object-layout" class="source-block" data-source-block="101"
+data-source-sha256="0abe7bf01f29e6736982f9f01f0458b46cacf628091fc74b19d7c8962b802506">
+<h3>Object layout</h3>
+</section>
+<div class="source-block" data-source-block="102"
+data-source-sha256="332b087846023ac190ea28b1fd3947e468ffef218c367c01bd58cc3f7b24f7d7">
+<pre class="text"><code>attempts/&lt;attempt-id&gt;/gateway-registration.json
+attempts/&lt;attempt-id&gt;/&lt;run-id&gt;/
+  input.json
+  authority.json
+  started.json
+  events/&lt;first-sequence&gt;-&lt;last-sequence&gt;.json
+  output/result.json
+  output/git-status.txt
+  output/changes.patch
+  output/untracked.tar
+  output/manifest.json</code></pre>
+</div>
+<div class="source-block" data-source-block="103"
+data-source-sha256="47b97b59a6c6df96481c59554bf362faedd1e7b648b90230f8e818bab7601e77">
+<p>Inputs are immutable. Authority is the only mutable object and uses
+generation preconditions. Event and output objects are create-only. The
+final manifest carries the complete provenance and checksum binding
+defined in section 4 and is published last.</p>
+</div>
+<section id="dispatch-states" class="source-block"
+data-source-block="104"
+data-source-sha256="58b9d0d1475cd1cfef5f9fd4d67c0a132c9bcbae48ec57b4eb3d5c519ba87eec">
+<h3>Dispatch states</h3>
+</section>
+<div class="source-block" data-source-block="105"
+data-source-sha256="cef8e167675efefe4e417cb835e04cdf1a6f417edd880b357db8b39085ace786">
+<p>The internal dispatch states are <code>dispatching</code>,
+<code>starting</code>, <code>running</code>,
+<code>timeout_requested</code>, <code>cancel_requested</code>,
+<code>reconciling</code>, and <code>terminal</code>. They map onto the
+existing Attempt states and remain internal. A transient Google API
+failure moves a record to <code>reconciling</code>; it does not invent a
+second Attempt or user-facing lifecycle.</p>
+</div>
+<section id="normative-state-machine" class="source-block"
+data-source-block="106"
+data-source-sha256="c89596c312d20ec77fc33a0371b97b41104ead5eccc22b0230083d15b3843d47">
+<h3>Normative state machine</h3>
+</section>
+<div class="source-block" data-source-block="107"
+data-source-sha256="4081ba5a0517b157c69bfc9126805b7e5cf359c4411342360c9231ee74a7b531">
+<p>Factory is the only state-machine writer. GCS objects and Cloud Run
+status are evidence that permit one Factory transition; they never transition a Run by themselves.</p>
+</div>
+<div class="source-block table-wrap" data-source-block="108"
+data-source-sha256="ae8fd859f272af692c071ffc8dd15552343e7c609ea66ccccb6647621cdac695">
+<table>
+<thead>
+<tr>
+<th>Factory dispatch state</th>
+<th>Required evidence</th>
+<th>Allowed next states</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dispatching</code></td>
+<td>Committed Attempt, run ID, immutable input; after authority
+creation, an unexpired monotonic Session deadline</td>
+<td><code>starting</code>, <code>timeout_requested</code>,
+<code>cancel_requested</code>, <code>terminal</code></td>
+</tr>
+<tr>
+<td><code>starting</code></td>
+<td>Accepted Run operation or matching start fence, before
+<code>session_deadline_at</code></td>
+<td><code>running</code>, <code>reconciling</code>,
+<code>timeout_requested</code>, <code>cancel_requested</code>,
+<code>terminal</code></td>
+</tr>
+<tr>
+<td><code>running</code></td>
+<td>Matching start fence and valid authority generation</td>
+<td><code>reconciling</code>, <code>timeout_requested</code>,
+<code>cancel_requested</code>, <code>terminal</code></td>
+</tr>
+<tr>
+<td><code>reconciling</code></td>
+<td>Incomplete or conflicting cloud observation; an unexpired Session
+deadline before returning to <code>starting</code> or
+<code>running</code></td>
+<td><code>starting</code>, <code>running</code>,
+<code>timeout_requested</code>, <code>cancel_requested</code>,
+<code>terminal</code></td>
+</tr>
+<tr>
+<td><code>timeout_requested</code></td>
+<td>Expired conservative monotonic Session deadline; refresh and Run calls
+disabled</td>
+<td><code>terminal</code> after confirmed revocation, elapsed
+conservative authority-uncertainty deadline, or provider-terminal proof
+for the matching execution set</td>
+</tr>
+<tr>
+<td><code>cancel_requested</code></td>
+<td>Durable cancellation time; refresh and Run calls disabled</td>
+<td><code>terminal</code> after confirmed revocation, elapsed
+conservative authority-uncertainty deadline, or provider-terminal proof
+for the matching execution set</td>
+</tr>
+<tr>
+<td><code>terminal</code></td>
+<td>One stored Factory outcome</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="source-block" data-source-block="109"
+data-source-sha256="92605c63925969d4fa17c9dd7f103f5ba6af430a9d3e81636696d00aa58ddb37">
+<p>Before every external side effect, the dispatcher commits the
+intended state and immutable run ID. A crash before the Run call leaves
+<code>dispatching</code> and may safely retry the same run ID and
+capability. A crash after Google accepts the call but before its
+response leaves <code>dispatching</code>. Immediately before each Run
+call, Factory obtains a Cloud Run provider timestamp from the preceding
+API response. Before the first Run, it durably initializes
+<code>provider_search_not_before</code> to that timestamp minus a
+60-second provider-clock margin. Before a later Run, it may only broaden
+discovery by storing the earlier of the existing and new cutoffs.
+Reconciliation pages every execution of the frozen Job version with
+provider <code>createTime</code> at or after that bound, inspects its
+effective environment overrides, and persists every execution carrying
+the exact Attempt ID and run ID before another Run call is allowed. It
+never derives this cutoff from the Factory clock. If any Run call lacks
+a trustworthy provider timestamp, Factory durably sets
+<code>provider_search_unbounded</code>; that flag never returns to
+bounded for the dispatch, and reconciliation pages all retained
+executions for the frozen Job version. A retry remains blocked until a
+complete paginated search and the two-minute provider-discovery window
+both find no matching execution. Another call may still create a
+duplicate container. Before checkout, model calls, Git writes, or
+external tool use, every container asks the gateway for the start fence.
+The gateway conditionally updates <code>authority.json</code> with the
+winning execution identity and then creates the exact
+<code>started.json</code> object with <code>ifGenerationMatch=0</code>.
+A retry after a failure between those writes completes the same winner's
+immutable evidence. Revocation and start-fence authority updates use the
+same generation compare-and-swap, so their order is unambiguous. A fence
+winner whose Attempt, run ID, input digest, or authority is stale exits
+nonzero. A fence loser exits zero without running the agent.</p>
+</div>
+<div class="source-block" data-source-block="110"
+data-source-sha256="56c939f7e943f2f2442cdbacca0ecebf66020014f3c7fe660d2ab016da4acb26">
+<p>Cloud Run execution names are provider-assigned and cannot be
+deterministic. The Factory Attempt and run ID provide deterministic
+dispatch identity. Factory stores every operation or execution name
+observed for that run ID immutably. The <code>started.json</code> winner
+names its <code>CLOUD_RUN_EXECUTION</code>; additional names are
+duplicate evidence and are cancelled. They never replace the winning
+identity. The prototype must prove that the v2 execution-list response
+exposes the effective overrides needed for this search. If it does not,
+durable launch is blocked until the design supplies another discoverable
+correlation key.</p>
+</div>
+<div class="source-block" data-source-block="111"
+data-source-sha256="9df722a6df9bb3dc1f32ca1c238f92b97f5e9c1836cd354ad8fd5fd460223f1a">
+<p>Artifact ingestion and verification do not decide the terminal race.
+Three SQLite transactions compete. Successful completion loads the
+verified manifest evidence and first obtains a fresh gateway
+authority-state response. Factory records local monotonic time
+immediately before that request and derives the conservative remaining Session duration from the returned gateway time and
+<code>session_deadline_at</code>. The single serialized SQLite statement
+that conditionally writes terminal success invokes a registered
+suspend-aware monotonic clock function and requires
+<code>now &lt; deadline</code> together with the checks that neither
+cancellation nor timeout intent is committed. The clock uses an
+operating-system continuous-time source that includes host sleep. The
+deadline value is not a wall-clock comparison or a boolean computed
+before entering SQLite. The serialized transaction first preserves any
+existing terminal, cancellation, or timeout owner. Only when no owner
+exists and the time predicate fails does it record timeout intent
+instead of success. A stale, missing, or failed gateway read does not by
+itself own the outcome. While the last trusted suspend-aware Session
+deadline remains unexpired, Factory leaves completion in
+<code>reconciling</code> and retries the authority read without
+accepting success. Once that deadline has expired, the same conditional
+timeout branch applies. An expired response also uses that branch. None
+can replace an existing owner. Prior manifest publication cannot extend
+the Runs. Explicit cancellation checks that neither a terminal outcome
+nor timeout intent is committed and atomically records
+<code>cancellation_requested_at</code>. Timeout checks that neither a
+terminal outcome nor cancellation is committed and atomically records
+<code>timeout_requested_at</code> and the <code>timeout_requested</code>
+dispatch state. SQLite serialization makes one transaction the first
+durable Factory decision. If timeout intent wins, a later explicit
+cancel may accelerate the same gateway revocation and Cloud Run cleanup
+but cannot change the eventual timed-out outcome. If cancellation wins,
+later timeout observation cannot replace cancelled. If success wins
+before its deadline, neither signal can replace succeeded. Terminal
+completion is idempotent and the stored outcome always wins.</p>
+</div>
+<section id="authority-lease-protocol" class="source-block"
+data-source-block="112"
+data-source-sha256="46b54b10547213ed09e61c69ac4fa4b8c5014e4973c00500413552471129f51e">
+<h3>Authority lease protocol</h3>
+</section>
+<div class="source-block" data-source-block="113"
+data-source-sha256="fa4fb90452995445fec9a9321edd3a70b8084714f4af7af05c512a40df50bd7c">
+<p>The dispatcher is the sole authority decision-maker, and the gateway
+is the sole physical authority-object writer.
+<code>authority.json</code> contains the Attempt ID, run ID,
+run-capability digest, monotonically increasing revision, input digest,
+<code>session_deadline_at</code>, <code>valid_until</code>, winning
+execution identity when fenced, a complete
+<code>last_refresh_receipt</code>, revocation reason, and previous
+object generation. The receipt contains the request ID, expected storage
+generation, gateway processing time, resulting <code>valid_until</code>,
+and deterministic resulting logical authority revision. It does not
+claim the provider-assigned generation of the write that contains it,
+because GCS assigns that value only after accepting the payload. The
+receipt is written atomically with the authority extension. Every later
+non-refresh authority mutation, including fencing and revocation, copies
+it byte-for-byte; the next successful refresh atomically replaces it
+with its own receipt. It remains in <code>authority.json</code> for the
+dispatch retention period, so any gateway instance can replay the
+current receipt after restart without process memory.</p>
+</div>
+<div class="source-block" data-source-block="114"
+data-source-sha256="371782252e833b4835480ec22669512960660580989ad3540bf3ce99c7788a59">
+<p>An authenticated refresh request contains a durable unique request ID
+and the expected generation, but no caller-supplied time. Factory allows
+only one outstanding refresh per dispatch and commits its request ID
+before sending. The gateway accepts it only while its own clock is
+before the current object's <code>valid_until</code>. It computes the
+new <code>valid_until</code> as the earlier of 30 seconds after its own
+server time and <code>session_deadline_at</code>, then writes the authority
+and receipt with one GCS <code>ifGenerationMatch</code>. Replaying the
+request ID in the current receipt returns that exact receipt and never
+performs another compare-and-set or extends authority again, including
+after a later revocation. An older resolved request ID is rejected
+without mutation. The gateway returns the logical receipt together with
+the separately read current storage generation, current logical
+revision, and revocation state. The receipt is historical evidence, not
+current authority state, and Factory never treats its expected
+generation as a current generation. Factory ignores such a replay after
+timeout or cancellation intent owns the outcome. Factory cannot issue
+the next request until it has received and persisted that result. Thus
+one lost or delayed refresh can extend authority at most one 30-second
+window beyond the last acknowledged deadline; it cannot form an
+unbounded chain. At or after <code>session_deadline_at</code>, the gateway
+refuses refresh and start-fence requests and conditionally revokes any
+remaining authority. A precondition failure moves the dispatch to
+<code>reconciling</code> and stops refresh because another writer or
+stale state exists. A timeout or cancellation revocation then reads the
+new generation and retries until revocation is confirmed or the absolute
+deadline has arrived.</p>
+</div>
+<div class="source-block" data-source-block="115"
+data-source-sha256="bf5c076a19c81c3a1c50d7777ddffda9310343f591ef84224933680188eaa321">
+<p>Every refresh and authority-read response returns the gateway server
+time, <code>valid_until</code>, refresh request ID, logical revision,
+and the storage generation observed on the current object from one
+operation. The wrapper and Factory record suspend-aware monotonic
+instants both immediately before sending and immediately after receiving
+the response. They set an early fail-closed deadline by adding
+<code>valid_until - server_time</code> to the pre-request instant.
+Factory separately persists an authority-expiry upper bound by adding
+the same duration to the response-receipt instant. Network delay
+therefore shortens client permission but lengthens only the conservative
+proof window; neither bound can let Factory terminalize while gateway
+authority may still be valid. Neither the Factory clock nor the wrapper
+wall clock can extend validity. The wrapper fetches authority at most
+five seconds apart and verifies the revision and generation never move
+backwards. A read error is not authority. The wrapper may continue only
+until the last verified monotonic deadline; there is no grace period
+after that instant. Before checkout, agent start, every external publish
+action exposed by the wrapper, and final manifest upload, it requires
+current matching authority. On expiry or cancellation it sends SIGTERM
+to the process group immediately, waits ten seconds, sends SIGKILL,
+stops all Job-originated gateway writes, and exits nonzero. Any bounded
+failure evidence must already have been uploaded while the gateway still
+authorized it; timeout does not grant the Job a post-expiry write
+window. This does not prevent the gateway from performing a
+control-plane authority-revocation compare-and-set requested by
+Factory.</p>
+</div>
+<div class="source-block" data-source-block="116"
+data-source-sha256="82a47b8fcffaeb4b884a8efeea631d2a45ae392d6dc70e73a11313ff71b330b2">
+<p>Factory asks the gateway to refresh authority only while the same
+Attempt lease and dispatch record remain active. Every gateway response
+includes server time. Factory records local monotonic time immediately
+before every request and anchors
+<code>session_deadline_at - server_time</code> to that earlier instant.
+During dispatch and reconciliation, the shortest such monotonic deadline
+determines whether an accepted execution may continue; neither Factory
+wall time nor a delayed response can extend the Runs. Once that deadline
+arrives, Factory stops refresh and Run calls, atomically records
+<code>timeout_requested</code>, and asks the gateway to revoke authority
+even when no start fence exists. Fence and revocation requests compete
+through the same authority generation. On a generation conflict, Factory
+reads the new generation and retries revocation; it never refreshes
+authority. A successful revocation compare-and-set is the gateway fence:
+a delayed first delivery carrying the older generation is rejected,
+while replay of an already-consumed request ID may return only its
+immutable durable receipt and cannot mutate the revoked object. When the
+gateway is unreachable, Factory does not treat the last acknowledged
+lease alone as proof if a refresh is outstanding. Confirmed revocation,
+a gateway response showing that the absolute deadline has arrived,
+provider-terminal proof, or expiry of a conservative
+authority-uncertainty deadline permits Factory to commit the terminal
+outcome already owned by timeout or cancellation intent. When there is
+no outstanding refresh, that uncertainty deadline is the last
+acknowledged authority-expiry upper bound, not the earlier client-stop
+deadline. When one refresh may be unacknowledged, Factory adds one full
+30-second authority window to that receipt-anchored upper bound. The
+single-flight, idempotent refresh rule proves that no delayed request
+can extend authority beyond that later instant. Another gateway response
+is not required merely to restate expiry. Factory durably records which
+proof terminalized the outcome, then requests Cloud Run cancellation as
+platform cleanup. Therefore no container can retain valid authority
+after Factory records the terminal timeout or cancellation. After a
+Factory restart, no refresh or Run retry is allowed until a fresh
+gateway response establishes a new conservative monotonic deadline. If
+the gateway is unreachable, Factory first proves exclusive dispatch
+ownership and waits a full 60 seconds from its suspend-aware monotonic
+startup instant: one maximum currently valid 30-second lease plus one
+possible unacknowledged refresh extension. That conservative wait
+substitutes for the lost pre-restart anchor and may terminalize an
+already owned timeout or cancellation without a fresh gateway response;
+provider terminal state may do the same sooner only when it satisfies
+the set-wide proof below. Gateway failure cannot revive the
+execution.</p>
+</div>
+<div class="source-block" data-source-block="117"
+data-source-sha256="b56538024d1c7f9f6f37f1b0eb5d04835a3df2f0149ef916b5b6918ffce184bc">
+<p>Provider-terminal proof is set-wide, not evidence from any one
+duplicate. If a start-fence winner is known, its Cloud Run execution
+must be terminal and every other discovered matching execution must
+either be terminal or be proven unable to win the immutable fence. If no
+winner is known, every discovered matching execution must be terminal;
+otherwise Factory uses revocation or authority- expiry proof instead.
+Reconciliation completes pagination and the discovery window before
+declaring that set complete. The gateway performs every initial,
+refresh, and revocation authority-object write using its clock and
+generation precondition. A server shutdown, dispatcher crash, SQLite
+ownership loss, GCS generation conflict, or inability to prove state
+stops refresh. The first-release availability contract is explicit: a
+continuously available Factory controller is required for a continuously
+running Cloud Job.</p>
+</div>
+<div class="source-block" data-source-block="118"
+data-source-sha256="ebe12a5c16577b5f109ad54c2e5a2965310b610595a6b7ad578376da7eef815f">
+<p>After Factory commits explicit cancellation, it asks the gateway to
+revoke authority with one conditional write. A healthy wrapper observes
+that revocation within five seconds and kills a process that ignores
+SIGTERM within a further ten seconds. The product bound is 15 seconds
+after successful authority revocation, with a five-second allowance for
+dispatcher scheduling. If the controller disappears without revoking
+authority, the last 30-second authority window plus the possible single
+unacknowledged 30-second refresh extension plus the ten-second kill
+grace bounds process survival to 70 seconds. When no refresh is
+outstanding the original 40-second bound applies. Cloud Run may take
+longer to report the execution terminal, so Factory tracks that platform
+reconciliation separately with a two-minute deadline.</p>
+</div>
+</div>
+<div class="document-section">
+<section id="7-failure-behavior-and-lifecycle"
+class="source-block role-failures" data-source-block="119"
+data-source-sha256="caf163a2a6ae29594c9aceec85019732d86f557465622ee179014fdfedcee686">
+<h2>7. Failure behavior and lifecycle</h2>
+</section>
+<div class="source-block" data-source-block="120"
+data-source-sha256="0dd08e8cd58f121f188c9d0a529ecd71ed342be453cf93dc69eb7dff5e28c62d">
+<p>At startup, each enabled cloud profile must complete authentication
+validation before the dispatcher admits cloud Runs. A disallowed
+credential source, a principal mismatch, an invalid gateway audience, or
+a missing required or present forbidden permission marks the profile
+unhealthy with a specific reason. Factory does not try another local
+credential, invoke <code>gcloud</code>, read a key file, or fall back to
+a broader identity.</p>
+</div>
+<div class="source-block" data-source-block="121"
+data-source-sha256="c5ef8ce82f0a6e4d9069891bada1cbd7c41bc669a235f85c1f2b5ddaf93f892a">
+<p>If access-token or ID-token acquisition fails while an Attempt is
+active, Factory stops new Run and authority-refresh calls and moves the
+dispatch to reconciling. The wrapper stops when its last verified
+authority expires. Factory retries profile validation no more than once
+every 30 seconds with jitter. Restored credentials permit cleanup and
+reconciliation first. An agent whose authority expired is failed and
+cancelled rather than resumed. New cloud Runs start only after the complete profile validation passes again.</p>
+</div>
+<div class="source-block" data-source-block="122"
+data-source-sha256="d0d206b00ba760f32ba8c81185e0a90ac2be96fee83438b9386f89477f5624d1">
+<p>Replacing the VM's attached service account, deleting and recreating
+a service account under the same email, or changing the gateway audience
+creates an identity mismatch. Compute Engine requires a stop before
+changing the attached account, so startup validation rejects the new
+subject before reconciliation or dispatch after the VM restarts. As a
+defensive runtime check, Factory still reads the attached account from
+metadata before each ten-second authority refresh and every Run call. A
+live token or gateway-authorization failure stops the next refresh.
+Factory keeps the profile disabled until the stored expected subjects
+and deployed resources are explicitly reprovisioned and validated.</p>
+</div>
+<div class="source-block" data-source-block="123"
+data-source-sha256="031fd854f587be6dbfb4e71914c3422b563680c67da1eebaf3d1fce6ed135ad5">
+<p>If input upload fails, the Attempt remains preparing and dispatch
+retries after one second with jitter, doubling to at most 30 seconds
+until its five-minute dispatch deadline. No Cloud Job starts. Reaching
+the deadline fails the Attempt with an actionable storage or permission
+error.</p>
+</div>
+<div class="source-block" data-source-block="124"
+data-source-sha256="2de7c6b2da3b92885a2f51262dffa3a7c903f1c98a0c56d2352a6903fc892ad3">
+<p>If the Run API accepts a request but its response is lost, Factory
+keeps the same run ID and capability and enumerates matching executions
+as specified in section 6. It persists and supervises the complete
+matching set. A repeated API call is allowed only before the same monotonic Session deadline and may create another container, but only the
+execution that creates <code>started.json</code> can launch the agent.
+Other executions exit successfully without agent side effects, are
+recorded as duplicates, and are cancelled if they remain active.</p>
+</div>
+<div class="source-block" data-source-block="125"
+data-source-sha256="95cdf1107f979c01c559201cf7c8cd91b7427c322ac20af93fdbf47795f53619">
+<p>If container startup exceeds 30 seconds, the dispatcher continues
+renewing the Factory lease and cloud authority only while gateway time
+remains before the persisted <code>session_deadline_at</code> and Factory's
+conservative monotonic deadline has not expired. The gateway caps every
+authority lease at that deadline. When the monotonic deadline arrives,
+Factory records timeout intent and conditionally revokes gateway
+authority. After revocation is confirmed, it records the timed-out
+failure and requests Cloud Run cancellation even if the container has
+not started. A container that starts after that terminal decision cannot
+acquire the start fence or valid authority and exits without checkout or
+an agent process.</p>
+</div>
+<div class="source-block" data-source-block="126"
+data-source-sha256="af8fd1632463eb165e8ab9a2f0d6997d03a092b3988b85f0c35f0ee3c4bc385a">
+<p>If the frozen Session timeout expires during checkout or agent execution, the wrapper sends SIGTERM immediately, sends SIGKILL after
+ten seconds, and exits nonzero without attempting a final event.
+Factory's durable record supplies the same timed-out failure semantics
+as the persistent backend. The profile-wide Cloud Run Job timeout
+remains only a final platform kill switch.</p>
+</div>
+<div class="source-block" data-source-block="127"
+data-source-sha256="5860327a14bdcb59f60d6e9f4555349a6108ed648a3814e2765609d5cda21f7d">
+<p>If event upload or ingestion fails, the wrapper retries bounded,
+immutable batches. Factory accepts a repeated batch only when its
+identity and bytes match. A conflicting batch fails the Attempt.</p>
+</div>
+<div class="source-block" data-source-block="128"
+data-source-sha256="97d00497f4de574df3d3237c302441c310818e1abb19e13bc0772bae86a4126d">
+<p>If the agent, wrapper, or container crashes, Cloud Run does not retry
+it. The dispatcher retains partial artifacts, records the exit evidence,
+and fails the Attempt. An operator can create an explicit retry.</p>
+</div>
+<div class="source-block" data-source-block="129"
+data-source-sha256="c86e04d29afedf4dad185bd7227e9d9727d836f0d206f62b0c7188b649896f40">
+<p>If Factory loses Google API access temporarily, it keeps the dispatch
+in reconciling and continues authority only while it can still prove
+ownership and remain within the 30-second bound. Once authority expires,
+the wrapper stops the agent. Factory cancels the cloud execution when
+access returns and fails the Attempt rather than reviving it.</p>
+</div>
+<div class="source-block" data-source-block="130"
+data-source-sha256="9de79a54e0e9e4f03516d3809a543baed95b9a39d11f617db40df7e5485e59fc">
+<p>If Factory restarts, it loads every nonterminal dispatch before
+admitting more cloud Runs. It verifies profile identity, authority
+generation, start fence, Cloud Run execution state, and artifacts. It
+resumes supervision only when the same Attempt still owns valid
+authority. Otherwise it revokes authority, cancels the execution, and
+records the outcome owned by the durable decision: timed out for stored
+timeout intent, cancelled for stored cancellation, or failed when
+neither exists and ownership cannot be proved.</p>
+</div>
+<div class="source-block" data-source-block="131"
+data-source-sha256="9e0a6a9e08457b3f9a3e210db94f04f924f42dc64f5119c1daca64947d7ceb85">
+<p>If cancellation or timeout races with completion, the first durable
+Factory decision wins. Manifest upload, ingestion, or verification alone
+does not win. A terminal-success transaction committed first succeeds.
+Cancellation committed first produces cancelled. Timeout intent
+committed first produces timed out after authority revocation. Either
+non-success outcome retains any late artifact.</p>
+</div>
+<div class="source-block" data-source-block="132"
+data-source-sha256="6a3205de803bbb3de0c85495efca0aa25a37c849be2e338f609000efa8a7a40a">
+<p>Disabling a backend profile stops new dispatches. Existing executions
+continue under their frozen profile unless the operator explicitly
+cancels them. A profile cannot be deleted while nonterminal or retained
+cloud Attempts refer to it.</p>
+</div>
+<div class="source-block" data-source-block="133"
+data-source-sha256="d07fa3a2b0cb28ccbad16eee7a3f33d268de9d968924729199e3290c157faade">
+<p>Server shutdown stops new dispatch, revokes authority for active
+Jobs, requests Cloud Run cancellation, and waits for up to 30 seconds.
+On restart, Factory reconciles every nonterminal cloud dispatch before
+admitting new cloud Runs. The two-minute reconciliation deadline never
+replaces a durable terminal owner or bypasses authority-expiry proof. A
+dispatch with timeout or cancellation intent remains nonterminal until
+the gateway confirms revocation or absolute expiry, the conservative
+authority-uncertainty deadline elapses, or set-wide provider-terminal
+proof completes as defined above. It then commits the outcome already
+owned by that intent. Only a dispatch with neither intent that still
+cannot prove ownership within two minutes records a
+<code>cloud_reconciliation_timeout</code> failure with the external
+execution identity for operator cleanup. Expired or revoked authority
+keeps the agent stopped throughout.</p>
+</div>
+</div>
+<div class="document-section">
+<section id="8-security-privacy-and-operations" class="source-block"
+data-source-block="134"
+data-source-sha256="d373a802adb9444e8d300217a0222856fa057b13255436c0f4709f894158a5f1">
+<h2>8. Security, privacy, and operations</h2>
+</section>
+<div class="source-block" data-source-block="135"
+data-source-sha256="fb06f623c1b7e79e13a2348735e1b2dea4800bf8f097b0c9a618adc6dba719d8">
+<p>The initial trust boundary is one trusted Factory operator, trusted
+repository configuration, trusted Task instructions, and untrusted
+external context embedded inside that prompt. The Job may execute
+repository code. That code can read credentials available to the agent
+process, request tokens for permissions granted to the Job service
+account, and use permitted network egress.</p>
+</div>
+<div class="source-block" data-source-block="136"
+data-source-sha256="e1b5697710050d26e58f839fc02c3b1a7db97b123d6e6ebdd71e337ebc4d2318">
+<p>The dedicated control-plane VM is part of the dispatcher trust
+boundary. Any person or process with code execution on that VM can
+request its attached identity from the metadata server, so coding agents
+and repository hooks run on separate Worker hosts. The VM uses a
+dedicated service account rather than the Compute Engine default
+account. SSH and operating-system administration of that VM are
+therefore privileged dispatcher operations.</p>
+</div>
+<div class="source-block" data-source-block="137"
+data-source-sha256="962c8da4f85b30999ea1e0717e9e6e3c4b6571ed3b00d3196dea4d32056be396">
+<p>Each trust tier uses dedicated dispatcher, gateway, and Job service
+accounts and preferably a separate Google Cloud project. The dispatcher
+can run the versioned Job, manage its executions, and invoke only the
+gateway's dispatcher authority surface. The gateway validates the exact
+dispatcher principal and can access only the artifact bucket. The Job
+can invoke only the gateway's Job surface and read its dedicated
+model-secret resource, which has one enabled pinned version. It receives
+no artifact-store permission, Cloud Run administration, project editor,
+or Factory control-plane credential. Repository credentials are
+short-lived and scoped to one repository when private checkout or
+publishing is added.</p>
+</div>
+<div class="source-block" data-source-block="138"
+data-source-sha256="2077c98f6f4974c138131cc6586584a926d5695d4a2037c9055ae01f9ba8d708">
+<p>Factory's runtime image and service definition do not require the
+Google Cloud CLI. Provisioning may use <code>gcloud</code>, but it
+cannot copy its user configuration or tokens into the Factory service
+account. The deployment creates no user-managed service-account keys and
+recommends the <code>iam.disableServiceAccountKeyCreation</code> and
+<code>iam.disableServiceAccountKeyUpload</code> organization-policy
+constraints. Cloud Audit Logs remain enabled for Cloud Run
+administration, service-account token creation or impersonation, Secret
+Manager access, and artifact storage.</p>
+</div>
+<div class="source-block" data-source-block="139"
+data-source-sha256="1d5705b3f11bd63577ef1d089ed429070c2ec1b592d183c4d46294738c7e2c01">
+<p>Prompt text is stored in the encrypted artifact store rather than
+Cloud Run environment overrides. Identifiers placed in execution
+metadata are not secrets. Model keys are mounted from dedicated,
+single-version Secret Manager resources. Sanitized logs exclude prompts,
+secret values, raw model reasoning, and unbounded patches.</p>
+</div>
+<div class="source-block" data-source-block="140"
+data-source-sha256="c7ce0642a6eaeb75b0f049a5322689266082738f4d6071a51797783cf2c3a06f">
+<p>Cloud Run Jobs use disposable second-generation containers with
+namespace and privilege restrictions. They are not gVisor sandboxes. The
+product must call this managed isolation, not safe execution of hostile
+code. Egress restriction, per-repository credentials, quota isolation,
+and a stronger sandbox remain required before accepting arbitrary
+repositories. See Google's <a
+href="https://docs.cloud.google.com/run/docs/container-contract">container
+runtime contract</a>.</p>
+</div>
+<div class="source-block" data-source-block="141"
+data-source-sha256="3bb25466f9de310147919e6d99e1998e785e7b1539548ea77eca7190d71d4823">
+<p>As measured on 2026-08-12, one 1 vCPU and 2 GiB Job costs about
+$0.00132 per billable minute at the published default Jobs rates before
+the free tier. Jobs have a one-minute minimum, then bill in 100 ms
+increments. The published free tier is 240,000 vCPU-seconds and 450,000
+GiB-seconds per billing account each month, equivalent to about 62.5
+hours at that resource shape before other Cloud Run usage. Actual cost
+also includes model tokens, image builds and storage, logs, artifacts,
+Secret Manager, and network transfer. Region prices and quotas vary.
+Recheck the official <a
+href="https://cloud.google.com/run/pricing">Cloud Run pricing</a> before
+using these figures for a budget.</p>
+</div>
+<div class="source-block" data-source-block="142"
+data-source-sha256="34b9e9f237866ad143ca19d01c7717d3b5e30aba6e283a0cee52a80469e2068b">
+<p>Cloud execution is elastic, not infinite. The dispatcher enforces a
+configured capacity below project and regional quotas and rate limits.
+It reports quota, billing, permission, image, secret, and artifact
+failures separately. Cost and usage alerts belong in the guided setup
+before a profile can be enabled. See the current <a
+href="https://docs.cloud.google.com/run/quotas">Cloud Run quotas</a>
+when choosing profile capacity.</p>
+</div>
+<div class="source-block" data-source-block="143"
+data-source-sha256="f5a7fe2a0f813f2e91bb8f6acd31df569cb71553b3c58579d2e6372dbe423621">
+<p>Completed artifact prefixes use a configured retention period.
+Factory keeps the final manifest and digest after object expiry so
+history remains explicit about whether recovery bytes are still
+available. Cloud Run execution and Cloud Logging retention are
+diagnostic and are never the only retained record.</p>
+</div>
+</div>
+<div class="document-section">
+<section id="9-acceptance-criteria"
+class="source-block role-acceptance-criteria" data-source-block="144"
+data-source-sha256="6d76b4820d002f28fcf60404f54b3b5893667240dd3e86def26e97bd7b6ad68d">
+<h2>9. Acceptance criteria</h2>
+</section>
+<div class="source-block" data-source-block="145"
+data-source-sha256="05c8fbe8b6f7e3aa2b60a5881ba0ccfce60223544402dcdbf9eaf8644a136ca7">
+<ul>
+<li><code>AC-1</code>: One unchanged Task can run through its
+persistent default or a compatible Cloud Run manual override and
+produces the same user-facing Run lifecycle. Existing Tasks need no
+migration and remain persistent by default.</li>
+<li><code>AC-2</code>: A cloud Attempt runs the frozen full commit and
+rejects a mutable or mismatched Git reference.</li>
+<li><code>AC-3</code>: A lost launch response or duplicate execution
+starts at most one agent process for the Attempt and run ID.</li>
+<li><code>AC-4</code>: After Factory commits cancellation, it revokes
+authority within five seconds; a healthy wrapper stops the agent within
+15 more seconds, requests Cloud Run cancellation, and reaches a stable
+cancelled outcome. Controller loss with no outstanding refresh starts
+shutdown by 30 seconds and kills the process by 40 seconds. One
+unacknowledged refresh increases those conservative bounds to 60 and 70
+seconds; it cannot chain another extension.</li>
+<li><code>AC-5</code>: Factory restart reconciles every nonterminal
+execution before it admits new cloud Runs.</li>
+<li><code>AC-6</code>: Native Cloud Run retries are zero and only an
+explicit Factory retry creates another Attempt.</li>
+<li><code>AC-7</code>: Events remain ordered, bounded, and
+duplicate-safe across delayed or repeated object ingestion.</li>
+<li><code>AC-8</code>: Success requires Factory to reconstruct a
+verified final manifest and recovery artifact against the frozen commit;
+missing, non-applicable, conflicting, corrupt, unsafe, incomplete, or
+oversized artifacts fail the Attempt.</li>
+<li><code>AC-9</code>: The Job receives only the configured
+least-privilege identity and no operator API credential, durable cloud
+key, or secret prompt metadata.</li>
+<li><code>AC-10</code>: Attempt detail shows backend, execution
+identity, image digest, timing, model cost, artifact availability, and
+diagnostic log link.</li>
+<li><code>AC-11</code>: Persistent Worker behavior and configuration,
+including resolve-per-Attempt commit selection, remain compatible when
+no Cloud Run profile exists.</li>
+<li><code>AC-12</code>: Documentation and setup describe Cloud Run as
+managed, elastic, quota-bound isolation rather than free infrastructure
+or a hostile-code sandbox.</li>
+<li><code>AC-13</code>: Two concurrent Attempts using one profile cannot
+read, overwrite, fence, publish, or cancel each other's protocol
+data.</li>
+<li><code>AC-14</code>: Cloud Run startup, checkout, and agent execution
+share one frozen Session timeout established before the Run call. At its deadline Factory times out and cancels an accepted but unstarted
+execution, the gateway rejects a late start fence, and a running wrapper
+starts agent shutdown immediately, kills the process group within ten
+seconds, and publishes no success.</li>
+<li><code>AC-15</code>: On a dedicated Compute Engine VM with the
+configured dispatcher service account attached, Factory can read and run
+the versioned Job, inspect, cancel, and delete its executions, and
+invoke the gateway through direct APIs when <code>gcloud</code> is
+absent. Hosted mode rejects valid environment or local-file credentials,
+including a key for the expected dispatcher subject.</li>
+<li><code>AC-16</code>: A disallowed credential source, a different
+service-account subject, a wrong gateway audience, or a missing required
+or present forbidden permission leaves the cloud profile unhealthy and
+starts no execution. A live token or gateway-authorization failure
+during an Attempt stops authority refresh within ten seconds of the
+first observable authentication failure, lets authority expire, stops
+the agent, and reconciles cleanup before admitting new Runs. An
+attached-identity change made while the VM is stopped fails startup
+validation after restart.</li>
+<li><code>AC-17</code>: Effective IAM analysis, including inherited
+bindings, custom-role contents, and service-account policies, gives the
+dispatcher, gateway, and Job identities only the normative table's
+permissions. No temporary provisioner binding remains after setup. The
+gateway rejects a valid Google token for the wrong audience, surface, or
+service-account subject.</li>
+<li><code>AC-18</code>: The supported Google Cloud deployment runs no
+<code>factory-worker</code>, coding-agent process, or repository hook on
+the dispatcher VM. Persistent Workers on separate hosts can complete Runs without access to the dispatcher service account.</li>
+</ul>
+</div>
+</div>
+<div class="document-section">
+<section id="10-test-approach" class="source-block"
+data-source-block="146"
+data-source-sha256="c12e936da26b05f551bb9244d0b3c7384b2d3d340c374095d6baea0e971a43de">
+<h2>10. Test approach</h2>
+</section>
+<div class="source-block" data-source-block="147"
+data-source-sha256="b4c173bd5c071ae3ee947c2ef4ed6a6b41d6b813bc7894d6c3f7d76cd7f2eb4d">
+<p>State-machine tests will admit the same Task once through its
+persistent default and once through a Cloud Run manual override. They
+will prove <code>INV-1</code>, <code>INV-5</code>, <code>INV-11</code>,
+<code>AC-1</code>, <code>AC-6</code>, and <code>AC-11</code>.
+Cloud-specific input tests will prove <code>INV-2</code> and
+<code>AC-2</code>, including exact-commit reuse on retry.</p>
+</div>
+<div class="source-block" data-source-block="148"
+data-source-sha256="a6e88da106261d19b6022ce07667aa701e2a11b99ea81b834f200905d6f2e41c">
+<p>Dispatcher tests will inject lost responses, duplicate executions,
+delayed startup, API outages, stale generations, restart with the
+encrypted capability, missing or invalid encryption keys, Factory clocks
+ahead of and behind the gateway, delayed gateway responses, and quota
+failures to prove <code>INV-3</code>, <code>INV-4</code>,
+<code>INV-9</code>, <code>AC-3</code>, <code>AC-4</code>, and
+<code>AC-5</code>. A container-start delay beyond
+<code>session_deadline_at</code> must produce a timed-out Attempt, a Cloud
+Run cancellation request, no successful start fence, and no authority
+refresh beyond the deadline. A delayed gateway response that shortens
+Factory's monotonic deadline must persist timeout intent, race a late
+container start through one authority generation, confirm revocation
+before terminal timeout, and prevent any fence after that terminal
+commit. Delay tests anchor timers to the pre-request monotonic instant and prove startup and response transit cannot extend Session or authority deadlines. Lost-launch tests skew the Factory clock in both directions,
+place the accepted execution inside the provider-clock margin, and
+remove the provider timestamp entirely. They must still discover the
+exact Attempt and run ID before another Run call; the no-timestamp case
+must fall back to a complete retained-execution scan.
+Multiple-lost-response tests must prove that a later provider timestamp
+cannot move the cutoff forward and that an unbounded fallback can never
+become bounded again.</p>
+</div>
+<div class="source-block" data-source-block="149"
+data-source-sha256="8629548fef9185f2775a482169e67b0dcd82ce459929e8f726e2c62568f82cd5">
+<p>Protocol tests will reorder, repeat, corrupt, truncate, and oversize
+event and artifact objects to prove <code>INV-6</code>,
+<code>INV-7</code>, <code>INV-8</code>, <code>AC-7</code>, and
+<code>AC-8</code>. They will supply a hash-valid patch that does not
+apply, an invalid bundle base, unsafe and incomplete untracked archives,
+and a reconstructed Git status that differs from the manifest; none may
+reach success. They will force both SQLite transaction orderings for
+success versus cancellation, success versus timeout intent, and
+cancellation versus timeout intent. Each test proves that exactly one
+durable decision owns the outcome and that later signals can perform
+cleanup without replacing it. Success tests will verify that a manifest
+published before the deadline is still rejected when gateway response
+delay, scheduler delay, SQLite contention, host suspension, or restart
+makes the conservative monotonic deadline expire before the conditional
+terminal write. Before the trusted Session deadline, a transient missing or stale gateway response must remain <code>reconciling</code> and retry
+rather than record timeout. After expiry it must reject success and take
+the conditional timeout branch. Authority tests will make the gateway
+permanently unreachable after timeout and cancellation intent. With no
+outstanding refresh, expiry of the last acknowledged receipt-anchored
+authority-expiry upper bound terminalizes the owned outcome. With one
+committed unacknowledged refresh, terminalization remains blocked for
+one additional full authority window. Tests delay an acknowledged
+response, then lose a refresh accepted near actual expiry and prove
+Factory waits beyond the real lease plus its possible extension. A
+separate restart test discards the old monotonic anchor, makes the
+gateway unreachable, and proves terminalization remains blocked until
+Factory acquires exclusive dispatcher ownership and completes the full
+60-second current-plus-unacknowledged-lease wait on a fresh
+suspend-aware clock, including host suspension during that wait.
+Refresh-race tests delay and lose a refresh response, then prove
+cancellation cannot terminalize before the uncertainty deadline,
+replaying its request ID cannot extend authority again, and Factory
+cannot issue a second refresh while the first is unresolved. A request
+delayed past the current <code>valid_until</code> must be rejected
+without changing the authority generation, last request ID, or deadline.
+When revocation succeeds, its generation and request-ID fence must
+reject a delayed first delivery. A replay of a refresh consumed before
+revocation must return the original response without changing the
+current generation, revocation marker, or deadline, and Factory must
+ignore it for state transitions. The same replay must run after gateway
+restart and from a different gateway instance by reading the receipt
+retained in <code>authority.json</code>; an older resolved request ID
+must be rejected without mutation. A crash after the authority CAS
+succeeds but before response delivery, followed by fencing or
+revocation, gateway restart, and cross-instance replay must recover the
+logical receipt while returning the separately observed current
+generation and revocation state; no step may require embedding the
+provider-assigned resulting generation in the original receipt.
+Duplicate tests must prove that one terminal execution cannot satisfy
+provider-terminal proof while the fence winner remains active, and that
+the no-winner case requires every matching execution to be terminal.</p>
+</div>
+<div class="source-block" data-source-block="150"
+data-source-sha256="13427afc8ab115f6d529a459473e58b84326a2802844f153c95e892e8ded53d5">
+<p>Security tests will inspect the deployed Job configuration, IAM
+policy, input metadata, gateway request logs and traces, structured
+logs, and container environment to prove <code>INV-10</code>,
+<code>INV-12</code>, <code>INV-13</code>, <code>AC-9</code>,
+<code>AC-12</code>, and <code>AC-13</code>. They will verify that raw
+capabilities never appear in Factory artifacts or telemetry, that Cloud
+Run execution inspection is restricted to the intended identities, and
+that repository code cannot use the Job identity to run or cancel Cloud
+Run resources or access a sibling Attempt through the gateway or storage
+API. The real-project prototype must measure how long Cloud Run retains completed execution overrides and feed that value into the profile
+retention and operator warning.</p>
+</div>
+<div class="source-block" data-source-block="151"
+data-source-sha256="a9561f40be457945f1cb1524b3ead43db460d41e215b713d22d88cc0ba02d407">
+<p>Wrapper tests will expire the frozen Session timeout during checkout and agent execution, expire the five-minute pre-fence window, delay
+start-fence responses, make the process ignore SIGTERM, and delay
+artifact upload to prove <code>INV-14</code> and <code>AC-14</code>
+independently from the profile-wide Job timeout. After expiry they must
+observe no attempted or accepted Job-originated timeout event, final
+manifest, artifact, or other gateway write, while still permitting
+Factory's gateway authority-revocation compare-and-set.</p>
+</div>
+<div class="source-block" data-source-block="152"
+data-source-sha256="5463c9c22a8eff2eb4986ecf1155c4a13ca4c9d528b022a814fe8107f7fb09bb">
+<p>A gated real-project integration test will build an immutable image,
+run one read-only and one patch-producing Attempt, cancel one
+long-running Attempt, restart the dispatcher during one Attempt, and
+verify the final UI/API evidence required by <code>AC-4</code>,
+<code>AC-5</code>, and <code>AC-10</code>.</p>
+</div>
+<div class="source-block" data-source-block="153"
+data-source-sha256="65218b86dfb2a12985322ac86a8636b135891b806c1d15478204b77bdb42442b">
+<p>Authentication tests will run <code>factory-server</code> in an image
+without <code>gcloud</code> and then on a dedicated Compute Engine VM
+with an attached service account. Hosted mode tests set a valid
+expected-subject service-account key in
+<code>GOOGLE_APPLICATION_CREDENTIALS</code>, install valid user and
+service-account ADC at the well-known path, and confirm that each source
+is rejected before token resolution. Development tests accept only an
+impersonated-service-account ADC file targeting the expected subject.
+These cases prove <code>INV-15</code>, <code>AC-15</code>, and the
+direct API path.</p>
+</div>
+<div class="source-block" data-source-block="154"
+data-source-sha256="7a7d9fd6b7bb43cbfb505237cd6d66388bea32f027823e6666b158bd709ee88d">
+<p>Fault tests return token-refresh errors, deny each required
+permission, grant each forbidden permission, and use a wrong gateway
+audience. A controlled gateway returns 401 and 403 responses during a
+running Attempt and proves that Factory stops refresh within ten seconds
+of the first response. A separate real-project test removes the gateway
+invocation binding, waits until an access probe observes the removal,
+and then applies the same ten-second bound; IAM propagation time is
+recorded but is not part of that bound. Another real-VM test stops the
+VM, replaces its attached service account, restarts it, and proves
+startup reconciliation rejects the new subject before issuing a Run or
+refresh. A controlled metadata-server test double changes the subject
+while the process is active and proves the defensive pre-refresh check.
+These tests prove <code>AC-16</code> and that no launch or refresh
+occurs after validation fails.</p>
+</div>
+<div class="source-block" data-source-block="155"
+data-source-sha256="3f050156912556c3f055227e62c56252b2316c171bf2e526650fa8767e5f88c8">
+<p>The real-project security test will use effective-access analysis
+rather than only direct resource policy exports. It inspects inherited
+project, folder, and organization bindings; every custom-role
+definition; the configured Job, gateway, bucket, and secret policies;
+and each service-account resource policy. It tests the dispatcher
+allowlist and forbidden permissions, asserts that no runtime key or
+temporary provisioner binding exists, and sends gateway requests with
+<code>X-Serverless-Authorization</code>, missing or repeated
+Authorization headers, and signed tokens for the wrong issuer, expiry,
+audience, surface, and subject. These cases prove <code>INV-16</code>,
+<code>INV-17</code>, and <code>AC-17</code>. The deployment topology
+test will inspect the dispatcher VM's service definition and process
+tree, then confirm that its separately hosted persistent Worker has no
+dispatcher token source, to prove <code>INV-18</code> and
+<code>AC-18</code>.</p>
+</div>
+</div>
+<div class="document-section">
+<section id="11-risks-and-tradeoffs" class="source-block role-risks"
+data-source-block="156"
+data-source-sha256="1285aaa4ffd2e9469718aff3ada6282e941a59e9a8b79073a130a46b00ce69bd">
+<h2>11. Risks and tradeoffs</h2>
+</section>
+<div class="source-block" data-source-block="157"
+data-source-sha256="8145a775a41395627a1db9b9f649cfa58a8301841a93d3338a4d893274cea88a">
+<ul>
+<li>Cold starts and repeated checkout make short Jobs slower than warm
+Workers. Keep persistent Workers as the default and record backend
+timing separately.</li>
+<li>API model usage can cost more than an existing subscription. Show
+model and compute cost separately and allow per-profile budgets.</li>
+<li>A control-plane outage can leave cloud compute briefly alive. The
+external authority document bounds that window and the wrapper fails
+closed.</li>
+<li>Ephemeral recovery is weaker than a retained worktree. Require a
+verified artifact and show its expiry prominently.</li>
+<li>The Job identity and mounted model credential are visible to code in
+its Job. Separate trust tiers, pin the exact secret version, isolate
+artifact access behind the per-Attempt gateway, and start with trusted
+repositories.</li>
+<li>The Attempt gateway adds a managed service, cold-start latency, and
+request cost. It is required to prevent a shared Job identity from
+reaching sibling artifacts. Keep its API narrow and its deployment
+reproducible.</li>
+<li>Polling storage adds latency and API cost. Keep bounded intervals
+and preserve room for a private callback or queue in hosted
+deployments.</li>
+<li>Any process on the dispatcher VM can use its attached service
+account. Keep that VM dedicated to the control plane, restrict SSH
+access, and run every coding agent on a separate Worker or Cloud Run
+Job.</li>
+<li>Google Cloud concepts could leak into the product. Keep them in
+backend profile setup and Attempt diagnostics, not Task authoring
+vocabulary.</li>
+</ul>
+</div>
+</div>
+<div class="document-section">
+<section id="12-open-questions" class="source-block role-open-questions"
+data-source-block="158"
+data-source-sha256="9a814093a20806bc5a44c69acb6ee4c27c516199b03238efaf23de1e8b4e534d">
+<h2>12. Open questions</h2>
+</section>
+<div class="source-block" data-source-block="159"
+data-source-sha256="9160fbecc18cfc950a23f7da8a4c9cdf84659310115b467fdde4f9e46a116c54">
+<ul>
+<li>Should the first release support private repositories and branch
+publishing? This does not block the dispatcher and lifecycle work. The recommended first slice is public or otherwise pre-authorized read-only
+checkout plus durable patch artifacts, followed by short-lived
+repository-scoped GitHub App tokens.</li>
+<li>Should a hosted Factory deployment replace storage polling with a
+private callback or queue? This does not block the local-first design
+because the event and artifact identities remain the same.</li>
+<li>Should another managed job provider implement the same backend
+contract? This does not block Cloud Runs. Extract a provider interface
+only after a second implementation proves the shared boundary.</li>
+</ul>
+</div>
+</div>
+<div class="document-section">
+<section id="13-out-of-scope" class="source-block"
+data-source-block="160"
+data-source-sha256="c22168596a4b1b1829bac627abf17561e31167099a31c6893f97bddab585a496">
+<h2>13. Out of scope</h2>
+</section>
+<div class="source-block" data-source-block="161"
+data-source-sha256="b6c91211c12407088478c3541325a58749de4be334dfe435c4082d8996b6a43d">
+<ul>
+<li>Replacing SQLite orchestration with Temporal or another durable
+workflow engine.</li>
+<li>Hosting <code>factory-server</code> itself on Cloud Run, GKE, or
+another replicated platform.</li>
+<li>Removing or deprecating local and VM Workers.</li>
+<li>Running arbitrary untrusted repositories safely.</li>
+<li>Automatic provider selection based only on price.</li>
+<li>Native Cloud Run task fan-out for one Run Session.</li>
+<li>GPU agents, interactive terminals, or long-lived cloud development
+workspaces.</li>
+<li>A general multi-cloud job abstraction before a second provider
+exists.</li>
+</ul>
+</div>
+</div>
+
+    </main>
+  </div>
+  <footer class="document-footer">Generated from docs/cloud-run-agents/design.md by blueprint/html-doc@1. Edit the Markdown source, then regenerate.</footer>
+</body>
+</html>

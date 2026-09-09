@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+#
+# planning-save-answers <project> <n> <answers.md>
+#
+# Saves what the human said in the review. Answers are the one thing a frozen
+# checkpoint still accepts, because they record what was said rather than what
+# will be built (planning-api.md, rule 1).
+#
+# The whole file is saved. The Planning page shows it beside the PRD, and the
+# roadmap reads "answers were saved" to decide whether a checkpoint in review
+# is still waiting on the human.
+#
+# Exit: 0 saved, 1 API error, 2 usage.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+API="$SCRIPTS/../../dark-factory/scripts/factory-api"
+
+usage() { echo "usage: planning-save-answers <project> <n> <answers.md>" >&2; exit 2; }
+[ "$#" -eq 3 ] || usage
+[ -x "$API" ] || { echo "error: the dark-factory factory-api is not at $API" >&2
+  echo "hint: light-factory reaches the server through dark-factory's client. Install both." >&2; exit 2; }
+
+project="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+n="$2"; answers_file="$3"
+[[ "$project" =~ ^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$ ]] || {
+  echo "error: '$1' is not a project slug" >&2; exit 2; }
+[[ "$n" =~ ^[0-9]+$ ]] || { echo "error: checkpoint number must be an integer" >&2; exit 2; }
+n=$((10#$n))
+[ -f "$answers_file" ] || { echo "error: no such answers file: $answers_file" >&2; exit 2; }
+
+answers="$(cat "$answers_file")"
+[ -n "$(printf '%s' "$answers" | tr -d '[:space:]')" ] || {
+  echo "error: $answers_file is empty. Saving it would erase the answers already stored" >&2; exit 2; }
+
+payload="$(jq -nc --arg a "$answers" '{answers: $a}')"
+response="$("$API" PUT "/api/v1/planning/projects/$project/checkpoints/$n/answers" "$payload")" || exit 1
+
+printf '%s' "$response" | jq -r '
+  "answers saved for " + (.project) + " checkpoint " + (.number | tostring)
+  + " (" + ((.answers // "") | length | tostring) + " characters)"'

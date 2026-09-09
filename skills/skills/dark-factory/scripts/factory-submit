@@ -1,0 +1,288 @@
+#!/usr/bin/env bash
+#
+# factory-submit --name TITLE --spec-file PATH
+#                [--project NAME | --repo github.com/owner/name]
+#                [--draft] [--assurance fast|reviewed] [--pipeline NAME] [--request-key KEY]
+#                [--planning PROJECT:N:ROUND]
+#
+# With neither --project nor --repo, the repository is this checkout's origin
+# normalized to github.com/owner/name. The caller is nearly always standing in
+# the repository it is submitting work against, so the project map is a
+# convenience, not a prerequisite: a new repository needs no line in it and no
+# hand registration.
+#
+# Builds and sends protocol.AdmitWorkRequest (internal/protocol/tasks.go:255-266).
+# A model never writes this payload. Things that would silently go wrong if it did:
+#
+#   - runtime defaults to "codex" server side. The only worker advertises
+#     "claude-code", so an omitted runtime produces Work nothing can claim.
+#   - decodeJSON uses DisallowUnknownFields. One extra key is 400 malformed_json.
+#   - request_key must be <= 200 bytes and must not start with "work:" or
+#     "schedule:", which are reserved prefixes.
+#   - repository must be exactly three slash separated parts beginning
+#     github.com. A URL form has five and is rejected.
+#   - The effective spec ceiling is well under the documented 64 KiB because
+#     admission reserves room in the 72 KiB agent prompt for a question, an
+#     answer, and history. We refuse at 32 KiB locally rather than let the
+#     server return an opaque agent_prompt_too_large.
+#   - --planning is the light factory's triple: the planning project, the
+#     checkpoint number, and the critic round. It is what lets the roadmap
+#     join a critique Work back to the checkpoint it critiqued, and it is the
+#     only reason a Work carries it. Sent only when asked for: admission
+#     rejects unknown fields, so an always-present empty object would 400
+#     every ordinary submission.
+#   - a repository the factory does not manage is 404 repository_not_found at
+#     admission, so this script registers it first when the list does not have
+#     it. Registration carries one key and no policy: default_delivery keeps
+#     the server's default, which is the only gate INV-8 has. A repository that
+#     is registered but disabled is a deliberate stop, and this script refuses
+#     rather than turning it back on.
+#   - delivery is never sent, and there is no flag for it. Admission inherits
+#     the repository's default_delivery whenever the field is absent, and that
+#     project setting is the only gate INV-8 has. A flag here would let a prompt
+#     turn auto merge on for a single submission, behind the cockpit's back.
+#
+# Exit: 0 admitted, 1 API error, 2 usage or local validation failure.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SKILL="$(cd "$SCRIPTS/.." && pwd -P)"
+API="$SCRIPTS/factory-api"
+. "$SCRIPTS/lib-repo.sh"
+# The project map is per machine, not per checkout, so it lives under the
+# user's factory directory and this skill is installed by copy over the top of
+# it. FACTORY_PROJECTS points the tests somewhere else.
+PROJECTS="${FACTORY_PROJECTS:-$HOME/.factory/dark-factory/projects.tsv}"
+
+MAX_SPEC_BYTES=32768
+
+usage() {
+  echo "usage: factory-submit --name TITLE --spec-file PATH [--project NAME | --repo github.com/owner/name] [--draft] [--assurance fast|reviewed] [--pipeline NAME] [--request-key KEY] [--planning PROJECT:N:ROUND]" >&2
+  echo "       with neither --project nor --repo, the repository is this checkout's origin" >&2
+  exit 2
+}
+
+project=""; repo_arg=""; title=""; spec_file=""; pipeline_name=""; request_key=""; planning=""
+pre_approved="true"; assurance="reviewed"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --project)     project="${2:-}"; shift 2 ;;
+    --repo)        repo_arg="${2:-}"; shift 2 ;;
+    --name)        title="${2:-}"; shift 2 ;;
+    --spec-file)   spec_file="${2:-}"; shift 2 ;;
+    --pipeline)    pipeline_name="${2:-}"; shift 2 ;;
+    --assurance)   assurance="${2:-}"; shift 2 ;;
+    --request-key) request_key="${2:-}"; shift 2 ;;
+    --planning)    planning="${2:-}"; shift 2 ;;
+    --draft)       pre_approved="false"; shift ;;
+    *) echo "error: unknown argument: $1" >&2; usage ;;
+  esac
+done
+
+[ -n "$title" ] && [ -n "$spec_file" ] || usage
+if [ -n "$project" ] && [ -n "$repo_arg" ]; then
+  echo "error: give --project or --repo, not both" >&2
+  exit 2
+fi
+case "$assurance" in
+  fast|reviewed) ;;
+  *) echo "error: assurance must be fast or reviewed" >&2; exit 2 ;;
+esac
+
+planning_json=""
+if [ -n "$planning" ]; then
+  # Three colon separated parts, parsed here so a malformed triple is a usage
+  # error with the shape in it rather than a 400 from the far end.
+  if [[ "$planning" =~ ^([a-zA-Z0-9][a-zA-Z0-9_-]*):([0-9]+):([0-9]+)$ ]]; then
+    planning_json="$(jq -nc \
+      --arg  p "$(printf '%s' "${BASH_REMATCH[1]}" | tr 'A-Z' 'a-z')" \
+      --argjson n "$((10#${BASH_REMATCH[2]}))" \
+      --argjson r "$((10#${BASH_REMATCH[3]}))" \
+      '{project: $p, number: $n, round: $r}')"
+  else
+    echo "error: --planning takes PROJECT:N:ROUND, for example payer:2:1" >&2
+    exit 2
+  fi
+fi
+
+if [ ! -f "$spec_file" ]; then
+  echo "error: no such spec file: $spec_file" >&2
+  exit 2
+fi
+
+# Three ways to name the repository, and they resolve differently on purpose.
+#
+# --project is the old path and is unchanged: the map is required, the line is
+# found by name, and its pipeline column decides. An empty column there still
+# means the server's default single stage pipeline, which is what that column
+# has always meant.
+#
+# --repo and a derived checkout are the new path, and neither needs the map to
+# exist. When it does exist, a line whose repository column matches wins, so a
+# project that has always run a particular pipeline keeps running it whether it
+# was named or derived. Otherwise FACTORY_DEFAULT_PIPELINE, and otherwise the
+# three stage pipeline, because reviewed is the default assurance and reviewed
+# work needs a pipeline that ends in delivery (Gap 10, Gap 11).
+DEFAULT_PIPELINE="Implement, review, deliver"
+
+if [ -n "$project" ]; then
+  if [ ! -f "$PROJECTS" ]; then
+    echo "error: no project map at $PROJECTS" >&2
+    echo "hint: mkdir -p $(dirname "$PROJECTS") && cp $SKILL/config/projects.tsv.example \"$PROJECTS\", then edit it" >&2
+    echo "hint: or drop --project and let this run from a checkout of the repository" >&2
+    exit 2
+  fi
+  repository="$(awk -F'\t' -v p="$project" '$1 == p { print $2; exit }' "$PROJECTS")"
+  if [ -z "$repository" ]; then
+    echo "error: project '$project' is not in $PROJECTS" >&2
+    echo "known projects:" >&2
+    awk -F'\t' '!/^#/ && NF > 1 { print "  " $1 }' "$PROJECTS" >&2
+    exit 2
+  fi
+  if [ -z "$pipeline_name" ]; then
+    if [ "$assurance" = "fast" ]; then
+      pipeline_name="Fast"
+    else
+      pipeline_name="$(awk -F'\t' -v p="$project" '$1 == p { print $3; exit }' "$PROJECTS")"
+    fi
+  fi
+else
+  if [ -n "$repo_arg" ]; then
+    repository="$(normalize_repo_url "$repo_arg")" || {
+      echo "error: --repo takes github.com/owner/name, not '$repo_arg'" >&2
+      exit 2
+    }
+  else
+    repository="$(repo_from_checkout)" || exit 2
+  fi
+  # No project name was given, so the repository's own last segment is the name
+  # for anything that needs one.
+  project="${repository##*/}"
+
+  if [ -z "$pipeline_name" ]; then
+    if [ "$assurance" = "fast" ]; then
+      pipeline_name="Fast"
+    else
+      if [ -f "$PROJECTS" ]; then
+        pipeline_name="$(awk -F'\t' -v r="$repository" \
+          '!/^#/ && NF > 1 && tolower($2) == tolower(r) { print $3; exit }' "$PROJECTS")"
+      fi
+      [ -n "$pipeline_name" ] || pipeline_name="${FACTORY_DEFAULT_PIPELINE:-}"
+      [ -n "$pipeline_name" ] || pipeline_name="$DEFAULT_PIPELINE"
+    fi
+  fi
+fi
+
+# A pipeline is named here and numbered by the factory. Resolving it through
+# the API means a skill can say "the reviewed pipeline" without a model ever
+# writing a UUID from memory, which is the same reason these scripts own every
+# payload.
+# Gap 10 and Gap 11 make the three stage shape mandatory for reviewed work:
+# a stage that reports the outcome loses its result text, and only the final
+# stage is told the publish branch.
+pipeline_id=""
+if [ -n "$pipeline_name" ]; then
+  pipelines="$("$API" GET /api/v1/pipelines)" || exit 1
+  pipeline_id="$(printf '%s' "$pipelines" \
+    | jq -r --arg n "$pipeline_name" '.pipelines[]? | select(.name == $n) | .id' | head -n1)"
+  if [ -z "$pipeline_id" ]; then
+    echo "error: no pipeline named '$pipeline_name' on this factory" >&2
+    echo "known pipelines:" >&2
+    printf '%s' "$pipelines" | jq -r '.pipelines[]? | "  " + .name' >&2
+    exit 2
+  fi
+fi
+
+# Reporting is execution policy, not task content. Factory appends its trusted
+# update contract only to a final agent stage, while a delivery stage reports
+# mechanically. Putting the contract in the spec would repeat it into every
+# stage and could make an implementer terminate the Work before review.
+spec_full="$(cat "$spec_file")"
+
+spec_bytes="$(printf '%s' "$spec_full" | wc -c | tr -d ' ')"
+if [ "$spec_bytes" -gt "$MAX_SPEC_BYTES" ]; then
+  echo "error: spec is too large: $spec_bytes bytes, limit $MAX_SPEC_BYTES" >&2
+  echo "hint: admission reserves room in the 72 KiB agent prompt for a question," >&2
+  echo "      an answer, and history, so the usable spec budget is far under 64 KiB." >&2
+  echo "      Split this into smaller slivers, which is the right answer anyway." >&2
+  exit 2
+fi
+
+if [ -z "$request_key" ]; then
+  request_key="$(uuidgen | tr 'A-Z' 'a-z')"
+fi
+
+case "$request_key" in
+  work:*|schedule:*)
+    echo "error: request key must not begin with 'work:' or 'schedule:'; both are reserved" >&2
+    exit 2 ;;
+esac
+if [ "${#request_key}" -gt 200 ]; then
+  echo "error: request key is longer than 200 bytes" >&2
+  exit 2
+fi
+
+# jq builds the body so every string is escaped correctly. --arg is a string
+# always; --argjson is used only for the boolean.
+payload="$(jq -nc \
+  --arg  rk "$request_key" \
+  --arg  repo "$repository" \
+  --arg  name "$title" \
+  --arg  spec "$spec_full" \
+  --arg  pipeline "$pipeline_id" \
+  --arg  assurance "$assurance" \
+  --argjson pre "$pre_approved" \
+  --argjson planning "${planning_json:-null}" \
+  '{
+     request_key: $rk,
+     repository:  $repo,
+     name:        $name,
+     spec:        $spec,
+     runtime:     "claude-code",
+     source:      "orchestrator",
+     pre_approved: $pre,
+     assurance:   $assurance
+   }
+   + (if $pipeline == "" then {} else {pipeline_id: $pipeline} end)
+   + (if $planning == null then {} else {planning: $planning} end)')"
+
+# Registration comes after every local check and after the pipeline resolves,
+# so a submission that was never going to be admitted does not leave a new
+# repository behind on the factory.
+repos="$("$API" GET /api/v1/repositories)" || exit 1
+known="$(printf '%s' "$repos" | jq -r --arg r "$repository" '
+  .repositories[]?
+  | select(((.remote_identity // "") | ascii_downcase) == ($r | ascii_downcase))
+  | (if .enabled then "enabled" else "disabled" end)' | head -n1)"
+
+case "$known" in
+  enabled) ;;
+  disabled)
+    echo "error: $repository is registered with the factory but disabled" >&2
+    echo "hint: a disabled repository is a deliberate stop. Turn it back on in the" >&2
+    echo "      cockpit if that is what you want; this script will not do it for you." >&2
+    exit 2 ;;
+  *)
+    reg_body="$(jq -cn --arg r "$repository" '{remote_identity: $r}')"
+    "$API" POST /api/v1/repositories "$reg_body" >/dev/null || exit 1
+    echo "registered $repository with the factory; its default delivery is untouched" >&2 ;;
+esac
+
+response="$("$API" POST /api/v1/work "$payload")" || exit 1
+
+run_id="$(printf  '%s' "$response" | jq -r '.run_id')"
+work_id="$(printf '%s' "$response" | jq -r '.work_ids[0]')"
+state="$(printf   '%s' "$response" | jq -r '.state')"
+
+# No local ledger. The factory is the only record of a run, factory-status
+# reads it from there, and a second copy in a file would drift.
+echo "run   $run_id"
+echo "work  $work_id"
+echo "state $state"
+
+# blocked is a scheduling state, not a gate, and not an error. It means no
+# worker was eligible or the concurrency slot was taken. It will be claimed.
+if [ "$state" = "blocked" ]; then
+  echo "note  blocked means no worker was free at admission, not that it was rejected" >&2
+fi

@@ -1,0 +1,45 @@
+name: Feature request
+description: Propose a focused improvement to Factory
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or operational problem should Factory solve?
+      placeholder: Describe the current limitation and who it affects.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the observable result without assuming a specific implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: Possible approach
+      description: Share a design or API idea if you have one.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Explain any workarounds or simpler options you considered.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add sanitized examples, links, or constraints that would help evaluate the request.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched for existing requests that cover this outcome.
+          required: true
+        - label: I removed secrets, credentials, and private repository data.
+          required: true

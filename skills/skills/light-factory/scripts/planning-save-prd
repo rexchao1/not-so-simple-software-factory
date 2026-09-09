@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+#
+# planning-save-prd <project> <n> <prd.md>
+#
+# Saves one checkpoint's PRD. The whole file is the body; the title and the
+# summary are read out of it so the Planning page has a name and a line to
+# show without anyone typing them twice.
+#
+#   # Checkpoint <n>: <name>   -> the title
+#   ## Slice, first sentence   -> the summary
+#
+# The number in the heading must match the number on the command line. A PRD
+# saved onto the wrong checkpoint is a whole-resource PUT over some other
+# checkpoint's text, and the page would look right afterwards.
+#
+# The summary is capped at 240 bytes here, cutting whole words, because the
+# server refuses a longer one and refusing the whole PUT over a long opening
+# sentence would lose the PRD as well.
+#
+# A frozen or built checkpoint refuses this with planning_checkpoint_frozen.
+# That is the promise the pebbles rest on, not an error to work around.
+#
+# Exit: 0 saved, 1 API error, 2 usage or a PRD this cannot parse.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+API="$SCRIPTS/../../dark-factory/scripts/factory-api"
+
+usage() { echo "usage: planning-save-prd <project> <n> <prd.md>" >&2; exit 2; }
+[ "$#" -eq 3 ] || usage
+[ -x "$API" ] || { echo "error: the dark-factory factory-api is not at $API" >&2
+  echo "hint: light-factory reaches the server through dark-factory's client. Install both." >&2; exit 2; }
+
+project="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+n="$2"; prd_file="$3"
+[[ "$project" =~ ^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$ ]] || {
+  echo "error: '$1' is not a project slug" >&2; exit 2; }
+[[ "$n" =~ ^[0-9]+$ ]] || { echo "error: checkpoint number must be an integer" >&2; exit 2; }
+n=$((10#$n))
+[ -f "$prd_file" ] || { echo "error: no such PRD file: $prd_file" >&2; exit 2; }
+
+heading="$(sed -n 's/^#[[:space:]]*Checkpoint[[:space:]]*\([0-9][0-9]*\)[[:space:]]*:[[:space:]]*\(.*\)$/\1|\2/p' \
+  "$prd_file" | head -n1)"
+[ -n "$heading" ] || {
+  echo "error: the PRD must open with '# Checkpoint <n>: <name>'" >&2; exit 2; }
+heading_n="${heading%%|*}"
+title="$(printf '%s' "${heading#*|}" | sed -e 's/[[:space:]]*$//')"
+[ -n "$title" ] || { echo "error: the heading has a number but no name" >&2; exit 2; }
+[ "$((10#$heading_n))" -eq "$n" ] || {
+  echo "error: $prd_file is checkpoint $((10#$heading_n)), you asked to save checkpoint $n" >&2
+  echo "hint: a PUT replaces the whole row, so this would overwrite the other checkpoint" >&2
+  exit 2; }
+
+# One sentence per line is the house style, so the first sentence is normally
+# the first line. Joining first means a wrapped paragraph still yields one.
+slice="$(awk '
+  /^##[[:space:]]/ { inside = (tolower($0) ~ /^##[[:space:]]*slice[[:space:]]*$/); next }
+  inside { print }' "$prd_file" | tr '\n' ' ' | tr -s ' ' | sed -e 's/^ *//' -e 's/ *$//')"
+summary="$(printf '%s' "$slice" | sed -e 's/\([^.]*\.\).*/\1/')"
+[ -n "$summary" ] || echo "note: no '## Slice' section, so the checkpoint is saved with no summary" >&2
+
+# 240 bytes is the server's bound. Cut whole words: a byte cut can split a
+# character in half, and a half character is not a summary.
+too_long() { [ "$(printf '%s' "$summary" | wc -c | tr -d ' ')" -gt 240 ]; }
+if too_long; then
+  while too_long; do
+    shorter="${summary% *}"
+    [ "$shorter" = "$summary" ] && break
+    summary="$shorter"
+  done
+  echo "note: the first sentence of ## Slice was over 240 bytes and was cut to fit" >&2
+fi
+
+body="$(cat "$prd_file")"
+payload="$(jq -nc --arg t "$title" --arg s "$summary" --arg b "$body" \
+  '{title: $t, summary: $s, body: $b}')"
+response="$("$API" PUT "/api/v1/planning/projects/$project/checkpoints/$n" "$payload")" || exit 1
+
+printf '%s' "$response" | jq -r '
+  "saved   " + (.project) + " checkpoint " + (.number | tostring),
+  "title   " + (.title // ""),
+  "summary " + (.summary // "(none)"),
+  "status  " + (.status // "?")'

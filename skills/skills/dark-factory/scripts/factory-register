@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+#
+# factory-register [<project> | --repo github.com/owner/name]
+#                  [--delivery pr|pr+automerge|branch]
+# factory-register --list
+#
+# Registers a repository with the factory when it is not registered yet,
+# optionally sets its default delivery, and prints its routing readiness.
+# --list prints every managed repository with its delivery mode.
+#
+# With no project name and no --repo, the repository is this checkout's origin
+# normalized to github.com/owner/name, which is the usual case: whoever is
+# running this is standing in the repository they want registered.
+#
+# Payloads, so a model never writes them:
+#   POST /api/v1/repositories            protocol.CreateManagedRepositoryRequest
+#                                        (internal/protocol/types.go), one key:
+#                                        remote_identity, github.com/owner/name.
+#   PUT  /api/v1/repositories/{id}/delivery  {"default_delivery": MODE}, and
+#                                        the handler refuses a missing key
+#                                        (internal/controlplane/http.go,
+#                                        setManagedRepositoryDefaultDelivery).
+#
+# default_delivery is the project setting INV-8 reads: pr+automerge is the only
+# mode under which the factory merges on its own, and it still needs passing
+# checks and an approving review. Changing it is a project decision, so this
+# script only does it when --delivery is given, and prints what it did.
+#
+# Exit: 0 ok, 1 API error, 2 usage.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+API="$SCRIPTS/factory-api"
+. "$SCRIPTS/lib-repo.sh"
+PROJECTS="${FACTORY_PROJECTS:-$HOME/.factory/dark-factory/projects.tsv}"
+
+usage() {
+  echo "usage: factory-register [<project> | --repo github.com/owner/name] [--delivery pr|pr+automerge|branch]" >&2
+  echo "       factory-register --list" >&2
+  echo "       with no project and no --repo, the repository is this checkout's origin" >&2
+  exit 2
+}
+
+list_repositories() { "$API" GET /api/v1/repositories; }
+
+if [ "${1:-}" = "--list" ]; then
+  repos="$(list_repositories)" || exit 1
+  printf '%s' "$repos" | jq -r '.repositories[] | [.id, .remote_identity, (if .enabled then "enabled" else "disabled" end), .default_delivery] | @tsv'
+  exit 0
+fi
+
+project=""; repo_arg=""; delivery=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --repo)     repo_arg="${2:-}"; shift 2 ;;
+    --delivery) delivery="${2:-}"; shift 2 ;;
+    -*) echo "error: unknown argument: $1" >&2; usage ;;
+    *)
+      [ -z "$project" ] || { echo "error: one project at a time: '$project' and '$1'" >&2; usage; }
+      project="$1"; shift ;;
+  esac
+done
+if [ -n "$project" ] && [ -n "$repo_arg" ]; then
+  echo "error: give a project name or --repo, not both" >&2
+  exit 2
+fi
+case "$delivery" in
+  ""|pr|pr+automerge|branch) ;;
+  *) echo "error: delivery must be pr, pr+automerge, or branch" >&2; exit 2 ;;
+esac
+
+# A project name still means the map. Anything else does not need the map to
+# exist at all, which is the point: a repository can be registered the first
+# time anyone stands in it.
+if [ -n "$project" ]; then
+  [ -f "$PROJECTS" ] || { echo "error: no project map at $PROJECTS" >&2; exit 2; }
+  repository="$(awk -F'\t' -v p="$project" '$1 == p { print $2; exit }' "$PROJECTS")"
+  [ -n "$repository" ] || { echo "error: project '$project' is not in $PROJECTS" >&2; exit 2; }
+  case "$repository" in
+    github.com/*/*) ;;
+    *) echo "error: the factory registers github.com/owner/name identities only, not '$repository'" >&2; exit 2 ;;
+  esac
+elif [ -n "$repo_arg" ]; then
+  repository="$(normalize_repo_url "$repo_arg")" || {
+    echo "error: --repo takes github.com/owner/name, not '$repo_arg'" >&2
+    exit 2
+  }
+else
+  repository="$(repo_from_checkout)" || exit 2
+fi
+
+repos="$(list_repositories)" || exit 1
+id="$(printf '%s' "$repos" | jq -r --arg r "$repository" '.repositories[] | select(.remote_identity == $r) | .id' | head -n1)"
+if [ -n "$id" ]; then
+  echo "registered already: $repository ($id)"
+else
+  body="$(jq -cn --arg r "$repository" '{remote_identity: $r}')"
+  created="$("$API" POST /api/v1/repositories "$body")" || exit 1
+  id="$(printf '%s' "$created" | jq -r '.id')"
+  [ -n "$id" ] && [ "$id" != "null" ] || { echo "error: the factory returned no repository id" >&2; exit 1; }
+  echo "registered: $repository ($id)"
+  repos="$(list_repositories)" || exit 1
+fi
+
+if [ -n "$delivery" ]; then
+  body="$(jq -cn --arg d "$delivery" '{default_delivery: $d}')"
+  updated="$("$API" PUT "/api/v1/repositories/$id/delivery" "$body")" || exit 1
+  echo "default_delivery: $(printf '%s' "$updated" | jq -r '.default_delivery')"
+else
+  echo "default_delivery: $(printf '%s' "$repos" | jq -r --arg id "$id" '.repositories[] | select(.id == $id) | .default_delivery' | head -n1)"
+fi
+
+readiness="$("$API" GET "/api/v1/repositories/$id/readiness")" || exit 1
+printf '%s' "$readiness" | jq -r '"routing_ready: \(.routing_ready)", (.workers[]? | "worker \(.name): cached=\(.cached) advertised=\(.advertised) ready=\(.ready) \(.reason)")'

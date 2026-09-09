@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.22.2
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: Install UI dependencies
+        working-directory: web
+        run: npm ci
+      - name: Check UI
+        run: just ui-check
+      - name: Build embedded UI
+        run: just ui-build 0
+      - name: Check embedded UI is current
+        run: |
+          git diff --exit-code -- web/dist
+          test -z "$(git status --porcelain --untracked-files=all -- web/dist)"
+      - name: Test Node-free operator build
+        run: just test-tooling
+      - name: Build Go binaries
+        run: just build
+      - name: Test reproducible release artifacts
+        run: just test-release
+      - name: Test local startup workflow
+        run: just test-launcher
+      - name: Check Go formatting
+        run: just format-check
+      - name: Run Go vet
+        run: just vet
+      - name: Check reachable Go vulnerabilities
+        run: just vuln
+      - name: Run staticcheck correctness checks
+        run: just staticcheck
+      - name: Check worker-control-plane boundary
+        run: just boundary
+      - name: Run Go server and worker tests
+        run: just test
+      - name: Install Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Run real-server browser tests
+        run: just test-browser
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: control-plane-browser-evidence
+          path: |
+            web/test-results/
+            web/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  macos:
+    name: macos (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: amd64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.22.2
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: Confirm native Darwin architecture
+        run: test "$(go env GOOS)/$(go env GOARCH)" = "darwin/${{ matrix.arch }}"
+      - name: Run Go tests
+        run: go test -timeout 5m ./...
+      - name: Run worker tests with the race detector
+        run: just test-worker-race
+      - name: Build and inspect native binaries
+        env:
+          FACTORY_BUILD_DIR: ${{ runner.temp }}/factory-bin
+        run: |
+          just build
+          test -x "$FACTORY_BUILD_DIR/factory-server"
+          test -x "$FACTORY_BUILD_DIR/factory-worker"
+          go version -m "$FACTORY_BUILD_DIR/factory-server" | grep -F "GOARCH=${{ matrix.arch }}"
+          go version -m "$FACTORY_BUILD_DIR/factory-worker" | grep -F "GOARCH=${{ matrix.arch }}"
+      - name: Test launcher process cleanup
+        run: just test-launcher
+
+  check:
+    name: check
+    if: always()
+    needs: [linux, macos]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every platform check
+        env:
+          LINUX_RESULT: ${{ needs.linux.result }}
+          MACOS_RESULT: ${{ needs.macos.result }}
+        run: |
+          test "$LINUX_RESULT" = success
+          test "$MACOS_RESULT" = success

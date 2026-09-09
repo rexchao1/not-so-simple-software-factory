@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+#
+# planning-save-pebbles <project> <n> <tasks-dir>
+#
+# Saves the split: the tasks cut from a frozen PRD, and the stones that
+# group them, as one batch.
+#
+# The directory holds what the pebble pass has always written:
+#
+#   NN-<slug>.md    one task each, ordered by NN. The "## " heading is the
+#                   title, the whole file is the body, NN is the ordinal,
+#                   and the file name without .md is the slug, which is the
+#                   name stones.json uses to point at it.
+#   stones.json     optional, beside the task files rather than inside, in the
+#                   shape the orchestrator's pebble pass wrote:
+#                   {"checkpoint": 2, "stones": [
+#                      {"id": "B1", "title": "...", "statement": "...",
+#                       "pebbles": ["01-driver", "02-publish"]}]}
+#
+# One batch, because the split is one answer to "what is this made of" and the
+# server replaces the whole previous split with it. Two requests could leave
+# pebbles pointing at stones from the last cut.
+#
+# With no stones.json every task goes into one stone named for the
+# checkpoint. The Planning page draws stones, and a checkpoint that was cut
+# before anyone grouped it still has to render as one chunk rather than as
+# nothing.
+#
+# A stones.json that names a task file that is not there is refused. A task
+# file no stone names is kept and left ungrouped: the server puts it in a
+# catch-all, so nothing is hidden, which is the safer direction of the two.
+#
+# Pebbles only exist under a frozen checkpoint. Cutting from a plan that can
+# still move is refused with planning_checkpoint_not_frozen.
+#
+# Exit: 0 saved, 1 API error, 2 usage or a directory this cannot read.
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+API="$SCRIPTS/../../dark-factory/scripts/factory-api"
+
+usage() { echo "usage: planning-save-pebbles <project> <n> <tasks-dir>" >&2; exit 2; }
+[ "$#" -eq 3 ] || usage
+[ -x "$API" ] || { echo "error: the dark-factory factory-api is not at $API" >&2
+  echo "hint: light-factory reaches the server through dark-factory's client. Install both." >&2; exit 2; }
+
+project="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+n="$2"; dir="$3"
+[[ "$project" =~ ^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$ ]] || {
+  echo "error: '$1' is not a project slug" >&2; exit 2; }
+[[ "$n" =~ ^[0-9]+$ ]] || { echo "error: checkpoint number must be an integer" >&2; exit 2; }
+n=$((10#$n))
+[ -d "$dir" ] || { echo "error: no such tasks directory: $dir" >&2; exit 2; }
+
+# stones.json sits beside the task files, so it is looked for in the same
+# directory the task files are read from, whichever of the two that is.
+manifest=""
+[ -f "$dir/stones.json" ] && manifest="$dir/stones.json"
+
+files="$(ls "$dir"/*.md 2>/dev/null | sort || true)"
+[ -n "$files" ] || { echo "error: no NN-slug.md task files in $dir" >&2; exit 2; }
+
+bad=""
+while IFS= read -r f; do
+  base="$(basename "$f")"
+  [[ "$base" =~ ^[0-9][0-9]-[a-z0-9_-]+\.md$ ]] || bad="$bad $base"
+done <<< "$files"
+[ -z "$bad" ] || { echo "error: task file names must look like NN-slug.md, got:$bad" >&2; exit 2; }
+
+count="$(printf '%s\n' "$files" | wc -l | tr -d ' ')"
+if [ "$count" -gt 5 ]; then
+  # The split rule is the skill's to enforce, not this script's: refusing here
+  # would strand a cut that the human has already agreed to. Say it loudly.
+  echo "note: $count tasks. The split rule allows five including closure, so this checkpoint is oversized." >&2
+fi
+
+pebbles="[]"
+while IFS= read -r f; do
+  base="$(basename "$f")"
+  slug="${base%.md}"
+  ordinal=$((10#${slug%%-*}))
+  title="$(sed -n 's/^##[[:space:]]\{1,\}//p' "$f" | head -n1 | sed -e 's/[[:space:]]*$//')"
+  [ -n "$title" ] || { echo "error: $base has no '## ' heading to take a title from" >&2; exit 2; }
+  body="$(cat "$f")"
+  pebbles="$(jq -c --arg s "$slug" --arg t "$title" --arg b "$body" --argjson o "$ordinal" \
+    '. + [{ordinal: $o, slug: $s, title: $t, body: $b}]' <<< "$pebbles")"
+done <<< "$files"
+
+if [ -n "$manifest" ]; then
+  jq -e '.stones | arrays and length > 0' "$manifest" >/dev/null 2>&1 || {
+    echo "error: $manifest is not JSON with a non-empty .stones array" >&2; exit 2; }
+
+  absent=""
+  for slug in $(jq -r '.stones[].pebbles[]?' "$manifest"); do
+    [ -f "$dir/$slug.md" ] || absent="$absent $slug"
+  done
+  [ -z "$absent" ] || {
+    echo "error: stones.json names task(s) with no file:$absent" >&2
+    echo "hint: a stone pointing at a task nobody wrote means the split and the tasks disagree" >&2
+    exit 2; }
+
+  # Stone ids are slugs; the server folds case, and folding here too keeps
+  # the ids in the request identical to the ids the pebbles point at.
+  # No ordinal is sent for a stone: the server numbers them from the order
+  # the batch arrives in, and the manifest's order is the order.
+  stones="$(jq -c '[.stones[] | {
+      id: (.id | ascii_downcase),
+      title: (.title // ""),
+      statement: (.statement // "")
+    }]' "$manifest")"
+
+  # One representation of the link: the pebble names its stone, the stone
+  # does not list its pebbles. The manifest carries the other one, so it is
+  # turned around here rather than sent as it stands.
+  map="$(jq -c '[.stones[] | . as $s | (.pebbles // [])[] | {slug: ., id: ($s.id | ascii_downcase)}]
+    | map({(.slug): .id}) | add // {}' "$manifest")"
+  pebbles="$(jq -c --argjson m "$map" \
+    'map(if $m[.slug] then . + {stone_id: $m[.slug]} else . end)' <<< "$pebbles")"
+else
+  title="$("$API" GET "/api/v1/planning/projects/$project/checkpoints/$n" 2>/dev/null \
+    | jq -r '.title // ""')"
+  [ -n "$title" ] && [ "$title" != "null" ] || title="Checkpoint $n"
+  stones="$(jq -nc --arg t "$title" '[{id: "b1", title: $t}]')"
+  pebbles="$(jq -c 'map(. + {stone_id: "b1"})' <<< "$pebbles")"
+fi
+
+payload="$(jq -nc --argjson s "$stones" --argjson p "$pebbles" '{stones: $s, pebbles: $p}')"
+response="$("$API" PUT "/api/v1/planning/projects/$project/checkpoints/$n/pebbles" "$payload")" || exit 1
+
+printf '%s' "$response" | jq -r '
+  "saved   " + (.project) + " checkpoint " + (.number | tostring)
+    + ": " + ((.stones // []) | length | tostring) + " stone(s), "
+    + ((.pebbles // []) | length | tostring) + " pebble(s)",
+  ((.stones // [])[] | "stone " + .id + "  " + (.title // "")),
+  ((.pebbles // [])[] | "  " + ((.ordinal | tostring)) + "  " + .slug + "  " + .title
+    + (if (.stone_id // "") != "" then "  [" + .stone_id + "]" else "  [ungrouped]" end))'

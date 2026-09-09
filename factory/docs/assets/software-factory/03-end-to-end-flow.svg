@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">The end-to-end software factory flow</title>
+  <desc id="desc">An issue moves through triage, specification, implementation, review, verification, human merge and monitoring, with exception routes and feedback loops.</desc>
+  <defs>
+    <filter id="s" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="7" stdDeviation="12" flood-color="#172033" flood-opacity=".08"/></filter>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 10 5 0 10z" fill="#7D8AA5"/></marker>
+    <marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 10 5 0 10z" fill="#7757D9"/></marker>
+    <style>.t{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;fill:#172033}.h{font-size:38px;font-weight:750}.sub{font-size:19px;fill:#657089}.label{font-size:17px;font-weight:700}.body{font-size:15px;fill:#526078}.small{font-size:14px;fill:#657089}.card{fill:#fff;stroke:#DCE2EE;stroke-width:2}.line{fill:none;stroke:#7D8AA5;stroke-width:3;marker-end:url(#a)}.dash{fill:none;stroke:#7757D9;stroke-width:3;stroke-dasharray:8 8;marker-end:url(#ad)}</style>
+  </defs>
+  <rect width="1600" height="900" rx="28" fill="#F7F8FC"/>
+  <text class="t h" x="64" y="70">A software factory is a controlled loop</text>
+  <text class="t sub" x="64" y="106">Deterministic triggers start work. Agents move it forward. Humans keep the important decisions.</text>
+
+  <text class="t label" x="72" y="172" fill="#2E5CC2">DISCOVER AND DEFINE</text>
+  <g filter="url(#s)">
+    <rect class="card" x="64" y="198" width="190" height="102" rx="18"/><rect class="card" x="300" y="198" width="190" height="102" rx="18"/><rect class="card" x="536" y="198" width="190" height="102" rx="18"/><rect x="772" y="198" width="190" height="102" rx="18" fill="#E5F6F1" stroke="#A7DCCD" stroke-width="2"/>
+  </g>
+  <g class="t label" text-anchor="middle"><text x="159" y="238">Event</text><text x="395" y="238">Triage</text><text x="631" y="238">Specification</text><text x="867" y="238">Human align</text></g>
+  <g class="t small" text-anchor="middle"><text x="159" y="266">issue, alert, schedule</text><text x="395" y="266">inspect and route</text><text x="631" y="266">product + technical plan</text><text x="867" y="266">approve intent</text></g>
+  <path class="line" d="M254 249H300M490 249H536M726 249H772"/>
+  <text class="t small" x="513" y="229" text-anchor="middle" fill="#7757D9">needs spec</text>
+
+  <text class="t label" x="72" y="401" fill="#2E5CC2">BUILD AND PROVE</text>
+  <g filter="url(#s)">
+    <rect class="card" x="64" y="427" width="190" height="102" rx="18"/><rect class="card" x="300" y="427" width="190" height="102" rx="18"/><rect class="card" x="536" y="427" width="190" height="102" rx="18"/><rect class="card" x="772" y="427" width="190" height="102" rx="18"/><rect x="1008" y="427" width="190" height="102" rx="18" fill="#E5F6F1" stroke="#A7DCCD" stroke-width="2"/><rect class="card" x="1244" y="427" width="190" height="102" rx="18"/>
+  </g>
+  <g class="t label" text-anchor="middle"><text x="159" y="467">Implement</text><text x="395" y="467">Test and CI</text><text x="631" y="467">Review</text><text x="867" y="467">Verify behavior</text><text x="1103" y="467">Human merge</text><text x="1339" y="467">Monitor</text></g>
+  <g class="t small" text-anchor="middle"><text x="159" y="495">smallest cohesive change</text><text x="395" y="495">repeat until green</text><text x="631" y="495">structured findings</text><text x="867" y="495">evidence per story</text><text x="1103" y="495">accountable decision</text><text x="1339" y="495">observe production</text></g>
+  <path class="line" d="M254 478H300M490 478H536M726 478H772M962 478H1008M1198 478H1244"/>
+  <path class="line" d="M867 300 C867 360 159 354 159 427"/>
+  <path class="line" d="M395 300 C395 355 159 357 159 427"/>
+  <text class="t small" x="356" y="345" fill="#2E5CC2">ready to implement</text>
+
+  <text class="t label" x="1080" y="172" fill="#C14E3F">TRIAGE EXCEPTIONS</text>
+  <rect x="1068" y="198" width="202" height="102" rx="18" fill="#FFF2DE" stroke="#F0C982" stroke-width="2"/><text class="t label" x="1169" y="238" text-anchor="middle">Needs information</text><text class="t small" x="1169" y="266" text-anchor="middle">ask, then stop</text>
+  <rect x="1304" y="198" width="202" height="102" rx="18" fill="#FFF2DE" stroke="#F0C982" stroke-width="2"/><text class="t label" x="1405" y="238" text-anchor="middle">Wait</text><text class="t small" x="1405" y="266" text-anchor="middle">dependency or decision</text>
+  <path d="M395 198 C395 148 1169 148 1169 198" fill="none" stroke="#F4A340" stroke-width="3" marker-end="url(#a)"/><path d="M395 198 C395 132 1405 132 1405 198" fill="none" stroke="#F4A340" stroke-width="3" marker-end="url(#a)"/>
+
+  <rect x="64" y="626" width="1370" height="169" rx="22" fill="#F1ECFF" stroke="#CEC0F4" stroke-width="2"/>
+  <text class="t label" x="96" y="670" fill="#6042B4">THE OUTER LEARNING LOOP</text>
+  <text class="t body" x="96" y="703">Human review comments, failed checks, production incidents and task outcomes become evidence about the workflow itself.</text>
+  <rect class="card" x="96" y="728" width="280" height="45" rx="12"/><text class="t small" x="236" y="756" text-anchor="middle">collect feedback</text>
+  <rect class="card" x="430" y="728" width="280" height="45" rx="12"/><text class="t small" x="570" y="756" text-anchor="middle">propose workflow change</text>
+  <rect class="card" x="764" y="728" width="280" height="45" rx="12"/><text class="t small" x="904" y="756" text-anchor="middle">evaluate on known tasks</text>
+  <rect class="card" x="1098" y="728" width="280" height="45" rx="12"/><text class="t small" x="1238" y="756" text-anchor="middle">human reviews process PR</text>
+  <path class="dash" d="M376 750H430M710 750H764M1044 750H1098"/>
+  <path class="dash" d="M1339 529 C1339 590 1238 595 1238 626"/><path class="dash" d="M96 750 C26 750 28 418 64 418"/>
+  <text class="t sub" x="800" y="852" text-anchor="middle">The inner loop ships changes. The outer loop improves how future changes are shipped.</text>
+</svg>

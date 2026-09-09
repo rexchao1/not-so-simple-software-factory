@@ -1,0 +1,14 @@
+# name	repository			pipeline
+# Tab separated. Copy to ~/.factory/dark-factory/projects.tsv and edit it. The
+# map is per machine, not per checkout, because this skill is installed by copy
+# and anything inside it is overwritten on the next install.
+# "repository" must be exactly owner/name form prefixed with github.com, three
+# slash separated parts. A URL form has five parts and is rejected with
+# 400 invalid_repository.
+# "pipeline" is optional and names one from GET /api/v1/pipelines. Empty means
+# the server's default single stage pipeline. Reviewed work should select a
+# pipeline ending in Factory delivery; project-specific pipelines can put one
+# canonical suite in a model-free code stage.
+# Delivery is deliberately absent. It is a per project setting held by the
+# server and set in the cockpit, and a submission must not override it.
+scratch	github.com/your-org/factory-scratch	Implement, review, deliver
