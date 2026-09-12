@@ -9,7 +9,7 @@ I ran the server on a Mac mini so I could work on my laptop, send work over, and
 
 The fork I started with was a simple software factory: drop a GitHub issue on a queue, wait for a pull request. That is a dark factory. It did not work for me as a developer starting a new project from scratch every other week. You still had to come back and iterate with an agent on the issues it leaves behind, and there is no planning step, so most of the time and work still goes into 3-4 parallel sessions for you to check in on.
 
-The light factory was the missing half. It is human-in-the-loop planning. You and the orchestrator research an idea, make a roadmap of checkpoints, write a PRD with every decision cited, run a critic, review it in the browser, then freeze/approve it and cut it into small tasks. Only then does anything go to the dark factory.
+The /light-factory skill was the missing half. It is human-in-the-loop planning. You and the orchestrator research an idea, make a roadmap of checkpoints, write a PRD with every decision cited, run a critic, review it in the browser, then freeze/approve it and cut it into small tasks. Only then does anything go to the dark factory.
 
 The /dark-factory skill teaches the agent how to use my factory, a locally hosted server. A decided spec goes in either from a ticket or from the light factory. A dark factory worker builds it in an isolated worktree and opens a pull request. Totally magic.
 
@@ -20,20 +20,20 @@ The /dark-factory skill teaches the agent how to use my factory, a locally hoste
 
 Shows what is queued, running, and finished work across repositories.
 
-<img src="assets/workSample.png" alt="Factory work board" width="500">
+<img src="assets/workSample.png" alt="Factory work board" width="700">
 
 ### Planning
 
 Milestones broken into checkpoints. Simple to keep track of and visualizes the real loop.
 
-<img src="assets/planningSample.png" alt="Factory planning and roadmap" width="500">
+<img src="assets/planningSample.png" alt="Factory planning and roadmap" width="700">
 
 ### Roadmap
 
 This keeps your view clear. It is the source of truth for both you and all your agents.
 Tasks broken down layer by layer into the simplest jobs. And each one shows a description and how much it cost.
 
-<img src="assets/flowSample.png" alt="Factory workflow execution" width="500">
+<img src="assets/flowSample.png" alt="Factory workflow execution" width="700">
 
 ## What I learned, and why I do not use this as my daily workflow
 
