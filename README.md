@@ -1,4 +1,4 @@
-# agent-workflow
+# not-so-simple-software-factory
 
 This is a light/dark factory workflow. The light factory and the dark factory are agent skills. They talk to an adapted local factory server. The agent you already sit with is the orchestrator that decides which skill to load.
 
